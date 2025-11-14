@@ -18,15 +18,11 @@ def moveto(robot, pos, orient_quat):
     while np.linalg.norm(robot.get_joint_angles(robot.controllable_joints) - target_joint_angles) > 0.03:
         m.step_simulation(realtime=True)
 
-
-# --------------------------------------------------------------------------
-# 1) Environment setup
-# --------------------------------------------------------------------------
 env = m.Env(seed=300)
 ground = m.Ground()
 m.visualize_coordinate_frame()
 
-# Table
+# table
 table = m.URDF(
     filename=os.path.join(m.directory, 'table', 'table.urdf'),
     static=True,
@@ -34,7 +30,7 @@ table = m.URDF(
     orientation=[0, 0, 0, 1],
 )
 
-# Just a visual wall (not strictly needed for the pen pickup)
+# wall
 wall = m.Shape(
     m.Box(half_extents=[0.2, 0.2, 0.04]),
     static=False,
@@ -43,15 +39,13 @@ wall = m.Shape(
     rgba=[0, 1, 1, 0.75],
 )
 
-# --------------------------------------------------------------------------
-# 2) Create the pen and let it drop
-# --------------------------------------------------------------------------
+# pen
 pen = m.Shape(
     m.Box(half_extents=[0.02, 0.1, 0.02]),
     static=False,
     mass=1,
     position=[0.0, -0.3, 1.0],
-    orientation=m.get_quaternion([0, 0, 0]),  # whatever, just some initial orientation
+    orientation=m.get_quaternion([0, 0, 0]),
     rgba=[0, 0, 1, 0.75],
 )
 pen.set_whole_body_frictions(
@@ -60,12 +54,10 @@ pen.set_whole_body_frictions(
     rolling_friction=0.05,
 )
 
-# Let the pen settle on the table
+# let the pen drop on the table
 m.step_simulation(steps=50, realtime=True)
 
-# --------------------------------------------------------------------------
-# 3) Create Panda robot and home pose
-# --------------------------------------------------------------------------
+# create robot
 robot = m.Robot.Panda(position=[0.5, 0, 0.76])
 robot.motor_forces = 100
 
@@ -84,47 +76,33 @@ robot.control(home_joints, set_instantly=True)
 # Open gripper
 robot.set_gripper_position([1.0, 1.0], set_instantly=True)
 
-# --------------------------------------------------------------------------
-# 4) Compute grasp orientation from pen yaw
-# --------------------------------------------------------------------------
-cube_pos, cube_orient_quat = pen.get_base_pos_orient()  # "cube" == pen base
-pen_euler = m.get_euler(cube_orient_quat)               # [roll, pitch, yaw] in same units as get_quaternion
+# grasp pose
+pen_pos, pen_orient = pen.get_base_pos_orient()
+pen_euler = m.get_euler(pen_orient)
 pen_yaw = pen_euler[-1]
-
-# Use the default downward orientation but match the pen's yaw
 gripper_euler = default_euler + [0, 0, pen_yaw]
 gripper_orient_quat = m.get_quaternion(gripper_euler)
 
-# --------------------------------------------------------------------------
-# 5) Pick up the pen:
-#    - move above the pen
-#    - move down to grasp
-#    - close gripper
-#    - lift pen
-# --------------------------------------------------------------------------
-
-# 5a) Move to pre-grasp pose (slightly above the pen)
+# move to pre-grasp pose
 pre_grasp_offset = np.array([0.0, 0.0, 0.15])
-pre_grasp_pos = cube_pos + pre_grasp_offset
+pre_grasp_pos = pen_pos + pre_grasp_offset
 moveto(robot, pre_grasp_pos, gripper_orient_quat)
 
-# 5b) Move down to grasp position (just above the table/pen)
+# move to grasp pose
 grasp_offset = np.array([0.0, 0.0, 0.01])
-grasp_pos = cube_pos + grasp_offset
+grasp_pos = pen_pos + grasp_offset
 moveto(robot, grasp_pos, gripper_orient_quat)
 
-# 5c) Close the gripper to grab the pen
+# close gripper (pen pick up)
 robot.set_gripper_position([0.0, 0.0], force=5000)
 m.step_simulation(steps=100, realtime=True)
 
-# 5d) Lift the pen straight up
+# lift pen
 lift_offset = np.array([0.0, 0.0, 0.25])
-lift_pos = cube_pos + lift_offset
+lift_pos = pen_pos + lift_offset
 moveto(robot, lift_pos, gripper_orient_quat)
 
 print('Done picking up the pen.')
 
-# --------------------------------------------------------------------------
-# 6) Let the simulation run so you can see the result
-# --------------------------------------------------------------------------
+# run sim
 m.step_simulation(steps=10000, realtime=True)
