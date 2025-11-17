@@ -8,7 +8,7 @@ import control as control
 # Defining environment
 # ---------------------------------------
 
-env = m.Env(time_step=0.005, seed=300)
+env = m.Env(time_step=0.02, seed=300)
 ground = m.Ground()
 m.visualize_coordinate_frame()
 
@@ -42,7 +42,7 @@ pen.set_whole_body_frictions(
 m.step_simulation(steps=100, realtime=True)
 
 # create robot
-robot = m.Robot.Jaco(position=[0.5, 0, 0.76])
+robot = m.Robot.Panda(position=[0.5, 0, 0.76])
 robot.motor_forces = 100
 robot.set_whole_body_frictions(
     lateral_friction=0.5, 
@@ -59,61 +59,60 @@ controller = control.Controller(
     motor_gains=0.05
 )
 
-# Home pose: above the table, looking forward
-home_pos = [-0.2, 0.2, 1.2]
-default_euler = np.array([np.pi/2, 0.0, 0.0])   
-home_orient_quat = m.get_quaternion(default_euler)
+# ---------------------------------------
+# Setting home pose
+# ---------------------------------------
 
+home_pos = [-0.4, 0.0, 1.2]
+default_euler = np.array([0.0, -np.pi/2, 0.0])   
+home_orient_quat = m.get_quaternion(default_euler)
 home_joints = robot.ik(
     robot.end_effector,
     target_pos=home_pos,
     target_orient=home_orient_quat,
 )
 robot.control(home_joints, set_instantly=True)
-
-
-
-# Open gripper
-robot.set_gripper_position([0.7, 0.7, 0.7], set_instantly=True)
-
-# grasp pose
-pen_pos, pen_orient = pen.get_base_pos_orient()
-print(pen_orient)
-pen_euler = m.get_euler(pen_orient)
-print(pen_euler)
-pen_yaw = pen_euler[-1]
-gripper_euler = default_euler + [np.pi/2, 0, 0]
-gripper_orient_quat = m.get_quaternion(gripper_euler)
-
-# move to pre-grasp pose
-pre_grasp_offset = np.array([0.0, 0.0, 0.15])
-pre_grasp_pos = pen_pos + pre_grasp_offset
-controller.moveto(pre_grasp_pos, gripper_orient_quat)
-
-# m.step_simulation(steps=10000, realtime=True)
-
-
-# move to grasp pose
-grasp_offset = np.array([0.0, 0.0, 0.03])
-grasp_pos = pen_pos + grasp_offset
-controller.moveto(grasp_pos, gripper_orient_quat)
-
-# close gripper (pen pick up)
 m.step_simulation(steps=100, realtime=True)
 
-robot.set_gripper_position([1.35, 1.35, 1.35], force=5000)
-m.step_simulation(steps=100, realtime=True)
+# ---------------------------------------
+# Follow Trajectory
+# ---------------------------------------
 
-# lift pen
-lift_offset = np.array([0.0, 0.0, 0.25])
-lift_pos = pen_pos + lift_offset
-controller.moveto(lift_pos, gripper_orient_quat)
+print(robot.get_motor_joint_states())
+print(robot.get_joint_angles())
 
-gripper_euler = default_euler + [np.pi/2, np.pi/2, 0]
-gripper_orient_quat = m.get_quaternion(gripper_euler)
-controller.moveto(lift_pos, gripper_orient_quat)
+traj = []
+N_traj = 40
+for i in range(N_traj):
+    traj.append([
+        home_pos[0] ,  
+        home_pos[1],              
+        home_pos[2] - 0.01 * i,              
+    ])
+    m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
+        position=[
+            home_pos[0],  
+            home_pos[1],              
+            home_pos[2] - 0.01 * i,              
+        ], rgba=[1, 0, 0, 1]
+    )
+traj = np.array(traj)
 
-print('Done picking up the pen.')
 
-# run sim
+total_steps = 40
+for t in range(total_steps):
+    idx = min(t, N_traj - 1)
+
+    # Local horizon
+    H = controller.N
+    ref_segment = traj[idx:idx + H]
+    if ref_segment.shape[0] < H:
+        last = ref_segment[-1]
+        pad = np.tile(last, (H - ref_segment.shape[0], 1))
+        ref_segment = np.vstack([ref_segment, pad])
+
+    # control using mpc...
+    controller.mpc_step(ref_segment)
+    m.step_simulation(steps=100, realtime=True)
+
 m.step_simulation(steps=10000, realtime=True)
