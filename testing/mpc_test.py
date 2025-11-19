@@ -18,28 +18,6 @@ table = m.URDF(
     position=[0, 0, 0],
     orientation=[0, 0, 0, 1],
 )
-wall = m.Shape(
-    m.Box(half_extents=[0.2, 0.2, 0.01]),
-    static=False,
-    position=[-0.2, 0, 0.745],
-    orientation=[0, 0, 0, 1],
-    rgba=[0, 1, 1, 0.75],
-)
-pen = m.Shape(
-    m.Cylinder(radius=0.015, length=0.1), # m.Box(half_extents=[0.02, 0.1, 0.02]),
-    static=False,
-    mass=0.1,
-    position=[0.0, -0.3, 1.5],
-    orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
-    rgba=[0, 0, 1, 0.75],
-)
-pen.set_whole_body_frictions(
-    lateral_friction=0.5,
-    spinning_friction=0.5,
-    rolling_friction=0.5,
-)
-# let pen drop on the table
-m.step_simulation(steps=100, realtime=True)
 
 # create robot
 robot = m.Robot.Panda(position=[0.5, 0, 0.76])
@@ -75,31 +53,31 @@ robot.control(home_joints, set_instantly=True)
 m.step_simulation(steps=100, realtime=True)
 
 # ---------------------------------------
-# Follow Trajectory
+# Follow trajectory
 # ---------------------------------------
 
-print(robot.get_motor_joint_states())
-print(robot.get_joint_angles())
+# print(robot.get_motor_joint_states())
+# print(robot.get_joint_angles())
 
 traj = []
-N_traj = 40
+N_traj = 500
 for i in range(N_traj):
     traj.append([
         home_pos[0] ,  
         home_pos[1],              
-        home_pos[2] - 0.01 * i,              
+        home_pos[2] - 0.001 * i,              
     ])
     m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
         position=[
             home_pos[0],  
             home_pos[1],              
-            home_pos[2] - 0.01 * i,              
+            home_pos[2] - 0.001 * i,              
         ], rgba=[1, 0, 0, 1]
     )
 traj = np.array(traj)
 
 
-total_steps = 40
+total_steps = 1000
 for t in range(total_steps):
     idx = min(t, N_traj - 1)
 
@@ -113,6 +91,6 @@ for t in range(total_steps):
 
     # control using mpc...
     controller.mpc_step(ref_segment)
-    m.step_simulation(steps=100, realtime=True)
+    # m.step_simulation(steps=100, realtime=True)
 
 m.step_simulation(steps=10000, realtime=True)
