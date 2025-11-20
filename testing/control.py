@@ -10,11 +10,11 @@ class Controller():
             robot,
             motor_gains,
             dt=0.02,
-            horizon=50,
+            horizon=10,
             w_e=1.0,
-            w_d=0.1,
+            w_d=0.25,
             w_a=0.1,
-            w_q = 0.5
+            w_q=0.5
         ):
         """
         Linear, Kinematic Model Predictive Controller
@@ -36,7 +36,6 @@ class Controller():
             1. go to (pos, orient_quat)
             2. wait until joint error is small
         """
-        print('[moveto] Using IK controller...')
         target_joint_angles = self.robot.ik(
             self.robot.end_effector,
             target_pos=pos,
@@ -78,7 +77,7 @@ class Controller():
 
         return S_v, S_a
 
-    def _get_position_jacobian(self, q_hat):
+    def _get_jacobian(self, q_hat):
         joint_states = self.robot.get_motor_joint_states()
         if q_hat is not None:
             # append gripper joints to full state
@@ -102,16 +101,31 @@ class Controller():
         # Keep only controllable joint columns
         J = np.array(J)[:, self.robot.controllable_joints]
         return J
-
-    def fk(self, q):
-        # Placeholder if you later want FK at arbitrary q
-        # For now, we rely on IK + Jacobian linearization.
-        return
-
-
+    
+    def apply_virtual_spring(self, ref_positions, stiffness=200.0, desired_force=3.0):
+        """ augment z-position with current force feedback
+        is this really just stiffness control? """
+        ref_new = ref_positions.copy()
+        dz = desired_force / stiffness
+        ref_new[:, 2] -= dz
+        return ref_new
+    
+    def apply_pen_tip_offset(self, ref_positions, tip_length=0.10):
+        """
+        Shift reference positions so MPC tracks the pen tip, not the EE frame.
+        Pen is aligned -Y after reorientation, so push forward in -Y direction.
+        """
+        offset = np.array([0.0, -tip_length, 0.0])
+        return ref_positions + offset
+    
     def mpc_step(self, ref_positions):
-        """ Linearized Kinematic MPC step """
-
+        """ Linearized Kinematic MPC step 
+        TODO: Add spring-like force model based on the position.
+        Where should I add the desired thickness
+        """
+        ref_positions = self.apply_virtual_spring(ref_positions)
+        ref_positions = self.apply_pen_tip_offset(ref_positions)
+        
         N = self.N
         n = self.n_dof
         _, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
@@ -126,34 +140,32 @@ class Controller():
                 target_orient=orient_curr,
                 use_current_joint_angles=True,
             )
-
             q_hats.append(q_hat)
-            J_hat = self._get_position_jacobian(q_hat=q_hat)
+            J_hat = self._get_jacobian(q_hat=q_hat)
             J_hats.append(J_hat)
 
-        J_hats = np.array(J_hats)   # (N, 3, n)
-        q_hats = np.array(q_hats)   # (N, n)
+        J_hats = np.array(J_hats)   
+        q_hats = np.array(q_hats)  
 
-        print("q_hat nominal trajectory: ", q_hats)
-        print("J_hats shape: ", J_hats.shape)
 
         # ---- Q and p initialization ----
         Q_task = np.zeros((N * n, N * n))
         p_task = np.zeros((N * n,))
 
-        Qe = self.w_e * np.eye(3)
-        Qd = self.w_d * np.eye(n)
-        Qa = self.w_a * np.eye(n)
+        Qe = self.w_e * np.eye(3) # position error
+        Qd = self.w_d * np.eye(n) # velocity smoothing
+        Qa = self.w_a * np.eye(n) # acceleration smoothing
+        Qq = self.w_q * np.eye(n) # reference regular ~ orientation
 
         for k in range(N):
             Jk = J_hats[k]             # (3, n)
             q_hat_k = q_hats[k]        # (n,)
 
-            # original tracking Hessian (rank ≤ 3)
+            # original tracking Hessian (rank < 3)
             A_k = Jk.T @ Qe @ Jk        # (n, n)
 
-            # ★ FULL-RANK regularization term ★
-            A_k_full = A_k + self.w_q * np.eye(n)
+            # reference trajectory term
+            A_k_full = A_k + Qq
 
             # linear term must also include joint-space part:
             p_k = -A_k @ q_hat_k - self.w_q * q_hat_k
@@ -179,61 +191,13 @@ class Controller():
         eps = 1e-6
         Q_reg = Q + eps*np.eye(Q.shape[0])
 
-        # Optimization + diagnostics
-
-        sym_diff = np.linalg.norm(Q_reg - Q_reg.T)
-        print("Symmetry error ||Q_reg - Q_reg.T|| =", sym_diff)
-
-        eigvals = np.linalg.eigvalsh(Q_reg)
-        print("Eigenvalues (Q_reg): min =", eigvals.min(), "max =", eigvals.max())
-        cond = eigvals.max() / (eigvals.min() + 1e-12)
-        print("Condition number (Q_reg) =", cond)
-
-        def full_cost(q_vec):
-            return q_vec.T @ Q_reg @ q_vec + 2 * p.T @ q_vec
-
-        def full_grad(q_vec):
-            return (Q_reg + Q_reg.T) @ q_vec + 2 * p
-
-        # analytic QP solution
+        # optimization 
         q_qp = -np.linalg.solve(Q_reg, p)
-        print("Full cost at QP solution:", full_cost(q_qp))
-        print("||grad(full_cost) at QP||:", np.linalg.norm(full_grad(q_qp)))
-
-        # SciPy check
-        Q_task_reg = 0.5*(Q_task + Q_task.T) + 1e-3*np.eye(Q_task.shape[0])
-        p_task_reg = p_task.copy()
-
-        def task_cost(q_vec):
-            return q_vec.T @ Q_task_reg @ q_vec + 2 * p_task_reg.T @ q_vec
-
-        def task_grad(q_vec):
-            return (Q_task_reg + Q_task_reg.T) @ q_vec + 2 * p_task_reg
-
-        q0 = q_hats.reshape(-1)
-        res = minimize(
-            fun=task_cost,
-            x0=q0,
-            jac=task_grad,
-            method='L-BFGS-B',
-            options={'maxiter':200, 'ftol':1e-12}
-        )
-
-        q_scipy_task = res.x
-        print("SciPy (TASK-ONLY) success:", res.success)
-        print("SciPy (TASK-ONLY) final objective:", res.fun)
-
-        q_qp_task = -np.linalg.solve(Q_task_reg, p_task_reg)
-        diff_norm = np.linalg.norm(q_scipy_task - q_qp_task)
-        rel_err = diff_norm / (np.linalg.norm(q_scipy_task)+1e-9)
-
-        print("TASK-ONLY: ||q_scipy - q_qp|| =", diff_norm)
-        print("TASK-ONLY: relative error =", rel_err)
 
         # ---- Output first step of MPC ----
         q_stack = q_qp
         q_opt = q_stack.reshape(N, n)
         q_des = q_opt[0]
-        self.robot.control(q_des, set_instantly=True)
+        self.robot.control(q_des) # , set_instantly=True
 
 

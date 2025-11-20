@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 import mengine as m
 import control as control
@@ -34,7 +35,13 @@ robot.set_whole_body_frictions(
 
 controller = control.Controller(
     robot=robot,
-    motor_gains=0.05
+    motor_gains=0.05,
+    dt=0.02,
+    horizon=10,
+    w_e=1.0,
+    w_d=0.25,
+    w_a=0.1,
+    w_q=0.5
 )
 
 # ---------------------------------------
@@ -55,31 +62,62 @@ m.step_simulation(steps=100, realtime=True)
 # ---------------------------------------
 # Follow trajectory
 # ---------------------------------------
+# TODO: add desired thickness of the written segment.
+# would require moving the trajectory onto a surface.
+# would also require getting the normals on the pen. 
 
-# print(robot.get_motor_joint_states())
-# print(robot.get_joint_angles())
-
+""" STRAIGHT LINE TRAJECTORY """
 traj = []
-N_traj = 500
+N_traj = 20
 for i in range(N_traj):
     traj.append([
         home_pos[0] ,  
         home_pos[1],              
-        home_pos[2] - 0.001 * i,              
+        home_pos[2] - 0.01 * i,              
     ])
     m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
         position=[
             home_pos[0],  
             home_pos[1],              
-            home_pos[2] - 0.001 * i,              
+            home_pos[2] - 0.01 * i,              
         ], rgba=[1, 0, 0, 1]
     )
 traj = np.array(traj)
 
+""" CIRCLE TRAJECTORY """
+# traj = []
+# N_traj = 20
+# diameter = 0.01 * (N_traj - 1)
+# radius = diameter / 2
+# thetas = np.linspace(0, 2*np.pi, N_traj)
 
-total_steps = 1000
+# for theta in thetas:
+#     point = [
+#         home_pos[0],
+#         home_pos[1] + radius * np.cos(theta),
+#         home_pos[2] + radius * np.sin(theta)
+#     ]
+#     traj.append(point)
+
+#     m.Shape(
+#         m.Sphere(radius=0.01),
+#         static=True,
+#         collision=False,
+#         position=point,
+#         rgba=[1, 0, 0, 1]
+#     )
+# traj = np.array(traj)
+
+
+# TODO: Find out how to make sure it is time consistent? Like how do I know how far along I am?
+# Should I be manually stepping the simulation to match the defined dt of the controller?
+total_steps = 500
+m.step_simulation(realtime=False)
+
 for t in range(total_steps):
-    idx = min(t, N_traj - 1)
+    traj_time = t * controller.dt
+    idx = int(traj_time / controller.dt)
+    idx = min(idx, N_traj - 1)
 
     # Local horizon
     H = controller.N
@@ -91,6 +129,7 @@ for t in range(total_steps):
 
     # control using mpc...
     controller.mpc_step(ref_segment)
-    # m.step_simulation(steps=100, realtime=True)
+    time.sleep(controller.dt)
+    m.step_simulation(steps=1, realtime=False)
 
 m.step_simulation(steps=10000, realtime=True)
