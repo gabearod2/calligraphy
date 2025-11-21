@@ -2,7 +2,7 @@ import os
 import time
 import numpy as np
 import mengine as m
-import control as control
+import control as c
 
 
 # ---------------------------------------
@@ -28,35 +28,34 @@ robot.set_whole_body_frictions(
     spinning_friction=1.0, 
     rolling_friction=1.0
 )
+for j in robot.controllable_joints:
+    robot.enable_force_torque_sensor(joint=j)
+
 
 # ---------------------------------------
 # Controller definition
 # ---------------------------------------
 
-controller = control.Controller(
+controller = c.Controller(
     robot=robot,
+    pen=None,
+    writing_pad=None, 
     motor_gains=0.05,
     dt=0.02,
     horizon=10,
-    w_e=1.0,
-    w_d=0.25,
-    w_a=0.1,
-    w_q=0.5
+    position_weight=1.0,
+    velocity_weight=0.1,
+    acceleration_weight=0.1,
+    reference_weight=0.5
 )
 
 # ---------------------------------------
 # Setting home pose
 # ---------------------------------------
 
-home_pos = [-0.4, 0.0, 1.2]
-default_euler = np.array([0.0, -np.pi/2, 0.0])   
-home_orient_quat = m.get_quaternion(default_euler)
-home_joints = robot.ik(
-    robot.end_effector,
-    target_pos=home_pos,
-    target_orient=home_orient_quat,
-)
-robot.control(home_joints, set_instantly=True)
+home_pos = [-0.4, 0.0, 1.2] 
+home_orient = m.get_quaternion(np.array([0.0, -np.pi/2, 0.0]))
+controller.ik_move_to(pos=home_pos, orient=home_orient, set_instantly=True)
 m.step_simulation(steps=100, realtime=True)
 
 # ---------------------------------------
@@ -66,47 +65,47 @@ m.step_simulation(steps=100, realtime=True)
 # would require moving the trajectory onto a surface.
 # would also require getting the normals on the pen. 
 
-""" STRAIGHT LINE TRAJECTORY """
-traj = []
-N_traj = 20
-for i in range(N_traj):
-    traj.append([
-        home_pos[0] ,  
-        home_pos[1],              
-        home_pos[2] - 0.01 * i,              
-    ])
-    m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
-        position=[
-            home_pos[0],  
-            home_pos[1],              
-            home_pos[2] - 0.01 * i,              
-        ], rgba=[1, 0, 0, 1]
-    )
-traj = np.array(traj)
-
-""" CIRCLE TRAJECTORY """
+# """ STRAIGHT LINE TRAJECTORY """
 # traj = []
 # N_traj = 20
-# diameter = 0.01 * (N_traj - 1)
-# radius = diameter / 2
-# thetas = np.linspace(0, 2*np.pi, N_traj)
-
-# for theta in thetas:
-#     point = [
-#         home_pos[0],
-#         home_pos[1] + radius * np.cos(theta),
-#         home_pos[2] + radius * np.sin(theta)
-#     ]
-#     traj.append(point)
-
-#     m.Shape(
-#         m.Sphere(radius=0.01),
-#         static=True,
-#         collision=False,
-#         position=point,
-#         rgba=[1, 0, 0, 1]
+# for i in range(N_traj):
+#     traj.append([
+#         home_pos[0] ,  
+#         home_pos[1],              
+#         home_pos[2] - 0.01 * i,              
+#     ])
+#     m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
+#         position=[
+#             home_pos[0],  
+#             home_pos[1],              
+#             home_pos[2] - 0.01 * i,              
+#         ], rgba=[1, 0, 0, 1]
 #     )
 # traj = np.array(traj)
+
+""" CIRCLE TRAJECTORY """
+traj = []
+N_traj = 100
+diameter = 0.01 * (20 - 1)
+radius = diameter / 2
+thetas = np.linspace(0, 2*np.pi, N_traj)
+
+for theta in thetas:
+    point = [
+        home_pos[0],
+        home_pos[1] + radius * np.cos(theta) - radius,
+        home_pos[2] + radius * np.sin(theta)
+    ]
+    traj.append(point)
+
+    m.Shape(
+        m.Sphere(radius=0.01),
+        static=True,
+        collision=False,
+        position=point,
+        rgba=[1, 0, 0, 1]
+    )
+traj = np.array(traj)
 
 
 # TODO: Find out how to make sure it is time consistent? Like how do I know how far along I am?
