@@ -27,9 +27,10 @@ class Controller():
 
         # inverse kinematics controller gains
         self.robot.motor_gains = motor_gains
+        self.pen_tip_local = np.array([0.0, -0.05, 0.0]) 
 
         # time, dof, and constant matrices
-        self.N = horizon
+        self.n_p = horizon
         self.dt = dt
         self.n_dof = len(self.robot.controllable_joints)
         self.S_v, self.S_a = self._build_S_matrices()
@@ -64,7 +65,7 @@ class Controller():
         ) > 0.03:
             m.step_simulation(realtime=True)
 
-    def move_to_first_point(self, pos, orient):
+    def move_to_first_contact(self, pos, orient):
         """
         IK-based move till contact
         """
@@ -77,33 +78,47 @@ class Controller():
                 use_current_joint_angles=True,
             )
             self.robot.control(target_joint_angles)
-            pos = pos + np.array([0.0, 0.0, -0.005])
+            pos = pos + np.array([0.0, 0.0, -0.00001])
             contact_point = self.pen.get_contact_points(bodyB=self.writing_pad, average=True)
             if contact_point is not None:
                 in_contact = True
+                pos = pos + np.array([0.0, 0.0, 0.001])
+                target_joint_angles = self.robot.ik(
+                    self.robot.end_effector,
+                    target_pos=pos,
+                    target_orient=orient,
+                    use_current_joint_angles=True,
+                )
+                self.robot.control(target_joint_angles)
             m.step_simulation(realtime=True)
 
     def _build_S_matrices(self):
         """
         Build constant matrices for velocity and acceleration linearization
         """
-        N = self.N
+        n_p = self.n_p
         dt = self.dt
         I_n = np.eye(self.n_dof)
 
-        S_v_base = np.zeros((N - 1, N))
-        for k in range(1, N):
+        S_v_base = np.zeros((n_p - 1, n_p))
+        for k in range(1, n_p):
             S_v_base[k - 1, k] =  1.0 / dt
             S_v_base[k - 1, k - 1] = -1.0 / dt
         S_v = np.kron(S_v_base, I_n) 
 
-        S_a_base = np.zeros((N - 2, N))
-        for k in range(2, N):
+        S_a_base = np.zeros((n_p - 2, n_p))
+        for k in range(2, n_p):
             S_a_base[k - 2, k]     =  1.0 / (dt ** 2)
             S_a_base[k - 2, k - 1] = -2.0 / (dt ** 2)
             S_a_base[k - 2, k - 2] =  1.0 / (dt ** 2)
         S_a = np.kron(S_a_base, I_n) 
         return S_v, S_a
+    
+    def get_ee_pose(self):
+        ee_position, ee_orientation = self.robot.get_link_pos_orient(
+            self.robot.end_effector
+        )
+        return np.array(ee_position), np.array(ee_orientation)
 
     def _get_ee_jacobian(self, q_hat=None):
         joint_states = self.robot.get_motor_joint_states()
@@ -136,13 +151,33 @@ class Controller():
         contact_normal_force, _, _ = self.pen.get_resultant_contact_forces(bodyB=self.writing_pad)
         return contact_point['posA'], contact_normal_force
     
-    def mpc_step(self, ref_positions):
+    def apply_pen_tip_displacement(self, ref_positions):
+        pen_pos, pen_orient = self.pen.get_base_pos_orient()
+        R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)
+        pen_tip_pos= pen_pos + R @ self.pen_tip_local
+        ee_pos, _ = self.get_ee_pose()
+        displacment = ee_pos - pen_tip_pos 
+        ref_positions += displacment
+        return ref_positions
+
+    def mpc_step(self, ref_positions, ref_thickness):
         """ 
         MPC control step
         """        
-        N = self.N
-        n = self.n_dof
-        pos_curr, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
+        n_p = self.n_p
+        n_dof = self.n_dof
+        _, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
+
+        # apply displacement from pen tip to end effector
+        ref_positions = self.apply_pen_tip_displacement(ref_positions)
+        for position in ref_positions:
+            m.Shape(
+                m.Sphere(radius=0.005),
+                static=True,
+                collision=False,
+                position=position,
+                rgba=[0, 1, 0, 0.5]
+            )
 
         # get current normal force
         contact_pos, normal_force_vec = self.get_normal_force()
@@ -152,9 +187,8 @@ class Controller():
             F_n_meas = float(np.linalg.norm(normal_force_vec))
 
         # constant thickness desired
-        F_n_des = float(np.linalg.norm(self.normal_force_des))
-
-        # apply PD control to augment ref_positions to track force
+        
+        # F_n_des = float(np.linalg.norm(self.normal_force_des))
 
 
         q_curr = self.robot.get_joint_angles(joints=self.robot.controllable_joints)
@@ -163,7 +197,7 @@ class Controller():
         q_hats = []
         J_hats = []
         q_hats.append(q_curr) # q_0 = q
-        for k in range(N-1):
+        for k in range(n_p-1):
             q_hat = self.robot.ik(
                 self.robot.end_effector,
                 target_pos=ref_positions[k+1],
@@ -180,11 +214,11 @@ class Controller():
         q_hats = np.array(q_hats)  
 
         # Total Q and p
-        Q = np.zeros((N * n, N * n))
-        p = np.zeros((N * n,))
+        Q = np.zeros((n_p * n_dof, n_p * n_dof))
+        p = np.zeros((n_p * n_dof,))
 
         # Get Q and p along horizon
-        for k in range(N):
+        for k in range(n_p):
             Jk = J_hats[k] # (3, n)
             q_hat_k = q_hats[k] # (n,)
 
@@ -192,14 +226,14 @@ class Controller():
             A_k_full = A_k + self.Q_q 
             p_k = -A_k @ q_hat_k - self.Q_q @ q_hat_k
 
-            row = k * n
-            col = k * n
-            Q[row:row+n, col:col+n] += A_k_full
-            p[row:row+n]            += p_k
+            row = k * n_dof
+            col = k * n_dof
+            Q[row:row+n_dof, col:col+n_dof] += A_k_full
+            p[row:row+n_dof] += p_k
 
         # smoothness costs
-        Q_v_big = np.kron(np.eye(N - 1), self.Q_v)
-        Q_a_big = np.kron(np.eye(N - 2), self.Q_a)
+        Q_v_big = np.kron(np.eye(n_p - 1), self.Q_v)
+        Q_a_big = np.kron(np.eye(n_p - 2), self.Q_a)
         Q_smooth = self.S_v.T @ Q_v_big @ self.S_v + self.S_a.T @ Q_a_big @ self.S_a
 
         # full cost
@@ -215,8 +249,8 @@ class Controller():
 
         # command first step
         q_stack = q_qp
-        q_opt = q_stack.reshape(N, n)
+        q_opt = q_stack.reshape(n_p, n_dof)
         q_des = q_opt[0]
-        self.robot.control(q_des, set_instantly=True) 
+        self.robot.control(q_des) # set_instantly=True
 
 
