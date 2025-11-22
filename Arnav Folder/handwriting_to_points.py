@@ -48,7 +48,7 @@ def dist(p1, p2):
                      (p2[2] - p1[2])**2)
 
 
-points = h_to_ps("gabe_handwriting/gabe.jpg")
+points = h_to_ps("gabe_handwriting/arnav_print.jpg")
 plot_points(points)
 print(len(points))
 
@@ -111,17 +111,4 @@ for index, point in enumerate(target_pos):
                 position=pos, rgba=[0, 1, 0, 1])
             
         m.step_simulation(realtime=True)
-    
-
-# for point in target_pos:
-#     # Move the end effector to a new pose
-#     for i in range(len(target_pos)):
-#         target_joint_angles = robot.ik(robot.end_effector, target_pos=point, target_orient=orient, use_current_joint_angles=True)
-#         robot.control(target_joint_angles, set_instantly=False)
-#         m.step_simulation(realtime=True)
-#         m.Shape(m.Sphere(radius=0.01), static=True, collision=False,
-#                    position=point, rgba=[1, 0, 0, 1])
-
-#         # position, orientation = robot.get_link_pos_orient(robot.end_effector)
-#         # if np.all(position == point):
             
