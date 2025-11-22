@@ -34,6 +34,10 @@ class Controller():
         self.n_dof = len(self.robot.controllable_joints)
         self.S_v, self.S_a = self._build_S_matrices()
 
+        # force control parameters
+        force_weight = 0.5
+        self.Q_f = force_weight
+
         # weighting matrices
         self.w_p = position_weight
         self.w_v = velocity_weight
@@ -44,7 +48,7 @@ class Controller():
         self.Q_a = self.w_a * np.eye(self.n_dof)
         self.Q_q = self.w_q * np.eye(self.n_dof)
 
-    def ik_move_to(self, pos, orient, set_instantly):
+    def ik_move_to(self, pos, orient, set_instantly=False):
         """
         IK-based move
         """
@@ -60,9 +64,28 @@ class Controller():
         ) > 0.03:
             m.step_simulation(realtime=True)
 
+    def move_to_first_point(self, pos, orient):
+        """
+        IK-based move till contact
+        """
+        in_contact = False
+        while not in_contact:
+            target_joint_angles = self.robot.ik(
+                self.robot.end_effector,
+                target_pos=pos,
+                target_orient=orient,
+                use_current_joint_angles=True,
+            )
+            self.robot.control(target_joint_angles)
+            pos = pos + np.array([0.0, 0.0, -0.005])
+            contact_point = self.pen.get_contact_points(bodyB=self.writing_pad, average=True)
+            if contact_point is not None:
+                in_contact = True
+            m.step_simulation(realtime=True)
+
     def _build_S_matrices(self):
         """
-        Build constant matrices for velocity and acceleration
+        Build constant matrices for velocity and acceleration linearization
         """
         N = self.N
         dt = self.dt
@@ -72,14 +95,14 @@ class Controller():
         for k in range(1, N):
             S_v_base[k - 1, k] =  1.0 / dt
             S_v_base[k - 1, k - 1] = -1.0 / dt
-        S_v = np.kron(S_v_base, I_n)   # shape: ((N-1)*n, N*n)
+        S_v = np.kron(S_v_base, I_n) 
 
         S_a_base = np.zeros((N - 2, N))
         for k in range(2, N):
             S_a_base[k - 2, k]     =  1.0 / (dt ** 2)
             S_a_base[k - 2, k - 1] = -2.0 / (dt ** 2)
             S_a_base[k - 2, k - 2] =  1.0 / (dt ** 2)
-        S_a = np.kron(S_a_base, I_n)   # shape: ((N-2)*n, N*n)
+        S_a = np.kron(S_a_base, I_n) 
         return S_v, S_a
 
     def _get_ee_jacobian(self, q_hat=None):
@@ -105,15 +128,13 @@ class Controller():
         J_lin = np.array(J_lin)[:, self.robot.controllable_joints]
         J_ang = np.array(J_ang)[:, self.robot.controllable_joints]
         return J_lin, J_ang
-    
-    # def apply_virtual_spring(self, ref_positions, stiffness=200.0, desired_force=3.0):
-    #     return 
-    
-    # def apply_pen_tip_offset(self, ref_positions, tip_length=0.10):
-    #     return
-    
-    def vertical_pd_control(self, ref_positions):
-        return
+
+    def get_normal_force(self):
+        contact_point = self.pen.get_contact_points(bodyB=self.writing_pad, average=True)
+        if contact_point is None:
+            return None, None
+        contact_normal_force, _, _ = self.pen.get_resultant_contact_forces(bodyB=self.writing_pad)
+        return contact_point['posA'], contact_normal_force
     
     def mpc_step(self, ref_positions):
         """ 
@@ -123,9 +144,15 @@ class Controller():
         n = self.n_dof
         pos_curr, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
 
-        # get current force
+        # get current normal force
+        contact_pos, normal_force_vec = self.get_normal_force()
+        if normal_force_vec is None:
+            F_n_meas = 0.0
+        else:
+            F_n_meas = float(np.linalg.norm(normal_force_vec))
 
-        # apply pen tip offset scenario
+        # constant thickness desired
+        F_n_des = float(np.linalg.norm(self.normal_force_des))
 
         # apply PD control to augment ref_positions to track force
 

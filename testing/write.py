@@ -2,7 +2,7 @@ import os
 import time
 import numpy as np
 import mengine as m
-import control as control
+import control as c
 
 
 # ---------------------------------------
@@ -13,19 +13,27 @@ env = m.Env(time_step=0.005, seed=300)
 ground = m.Ground()
 m.visualize_coordinate_frame()
 
+# world objects 
 table = m.URDF(
     filename=os.path.join(m.directory, 'table', 'table.urdf'),
     static=True, position=[0, 0, 0], orientation=[0, 0, 0, 1],
 )
 writing_pad = m.Shape(
-    m.Box(half_extents=[0.2, 0.2, 0.01]),static=False, 
-    position=[-0.2, 0, 0.745],orientation=[0, 0, 0, 1], rgba=[0, 1, 1, 0.75],
+    m.Box(half_extents=[0.3, 0.4, 0.01]), static=True, 
+    position=[-0.1, 0, 0.745], orientation=[0, 0, 0, 1], rgba=[0, 0, 0, 0.75],
 )
 pen = m.Shape(
-    m.Box(half_extents=[0.015, 0.1, 0.015]), # m.Cylinder(radius=0.015, length=0.1), 
-    static=False, mass=1.0, position=[0.0, -0.3, 1.5],
-    orientation=m.get_quaternion(euler=[0, np.pi/2, np.pi/2]),
-    rgba=[0, 0, 1, 0.75],
+    m.Box(half_extents=[0.01, 0.05, 0.01]), # m.Cylinder(radius=0.015, length=0.1), 
+    static=False, mass=1.0, position=[-0.1, -0.3, 1.5],
+    orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
+    rgba=[1, 1, 1, 1],
+)
+
+# setting friction
+writing_pad.set_whole_body_frictions(
+    lateral_friction=0, 
+    spinning_friction=0, 
+    rolling_friction=0
 )
 pen.set_whole_body_frictions(
     lateral_friction=2000, 
@@ -34,8 +42,6 @@ pen.set_whole_body_frictions(
 )
 # let pen drop on the table
 m.step_simulation(steps=100, realtime=True)
-pen_tip_offset = np.array([0.0, -0.05, 0.0])  # depends on orientation!
-
 
 # create robot
 robot = m.Robot.Panda(position=[0.5, 0, 0.76])
@@ -45,21 +51,24 @@ robot.motor_forces = 100
 # intialize controller definition
 # ---------------------------------------
 
-controller = control.Controller(
+controller = c.Controller(
     robot=robot,
+    pen=pen,
+    writing_pad=writing_pad, 
     motor_gains=0.05,
     dt=0.02,
     horizon=10,
-    w_e=1.0,
-    w_d=0.25,
-    w_a=0.1,
-    w_q=0.5
+    position_weight=1.0,
+    velocity_weight=0.1,
+    acceleration_weight=0.1,
+    reference_weight=0.5
 )
 
 # ---------------------------------------
 # Pick up writing utensil
 # ---------------------------------------
 
+print("Picking up the pen.")
 # set to home robot position instantly
 home_pos = [-0.2, 0.2, 1.2]
 default_euler = np.array([np.pi/2, 0.0, 0.0])   
@@ -77,18 +86,18 @@ robot.set_gripper_position([1]*2, set_instantly=True)
 pen_pos, pen_orient = pen.get_base_pos_orient()
 pen_euler = m.get_euler(pen_orient)
 pen_yaw = pen_euler[-1]
-gripper_euler = default_euler + [np.pi/2, 0, 0]
+gripper_euler = default_euler + [np.pi/2, 0, -np.pi/2]
 gripper_orient_quat = m.get_quaternion(gripper_euler)
 
 # move to pre-grasp pose
 pre_grasp_offset = np.array([0.0, 0.0, 0.15])
 pre_grasp_pos = pen_pos + pre_grasp_offset
-controller.moveto(pre_grasp_pos, gripper_orient_quat)
+controller.ik_move_to(pre_grasp_pos, gripper_orient_quat)
 
 # move to grasp pose
-grasp_offset = np.array([0.0, 0.0, -0.005])
+grasp_offset = np.array([0.0, 0.015, -0.0065])
 grasp_pos = pen_pos + grasp_offset
-controller.moveto(grasp_pos, gripper_orient_quat)
+controller.ik_move_to(grasp_pos, gripper_orient_quat)
 
 # close gripper
 m.step_simulation(steps=100, realtime=True)
@@ -96,57 +105,75 @@ robot.set_gripper_position([0]*2, force=10000)
 m.step_simulation(steps=100, realtime=True)
 
 # move to post-grasp pose
-lift_offset = np.array([0.0, 0.0, 0.25])
+lift_offset = np.array([0.0, 0.0, 0.35])
 lift_pos = pen_pos + lift_offset
-controller.moveto(lift_pos, gripper_orient_quat)
+controller.ik_move_to(lift_pos, gripper_orient_quat)
 
 # rotate to writing orientation
 gripper_euler = default_euler + [np.pi/2, np.pi/2, 0]
 gripper_orient_quat = m.get_quaternion(gripper_euler)
-controller.moveto(lift_pos, gripper_orient_quat)
-
-# run sim
-m.step_simulation(steps=10000, realtime=True)
+controller.ik_move_to(lift_pos, gripper_orient_quat)
 
 # ---------------------------------------
 # Generate handwriting trajectory
 # ---------------------------------------
 '''
-For now, just a circle on the writing_pad surface.
+For now, just a line on the writing_pad surface.
 '''
 
-# Writing surface height
-pad_z = 0.745 + 0.01  # top of pad
+print("Generating the writing trajectory.")
+writing_trajectory = []
+for i in range(5):
+    x = -0.3 
+    y = -0.2 + i * 0.01
+    z = 0.765
+    thickness = 0.005
 
-# draw circle of radius 5 cm
-radius = 0.05
-thetas = np.linspace(0, 2*np.pi, 200)
-
-traj_world = []
-for th in thetas:
-    x = -0.2              # constant X over pad
-    y = 0.0 + radius*np.cos(th)
-    z = pad_z + 0.002     # barely touching
-
-    traj_world.append([x, y, z])
-
-traj_world = np.array(traj_world)
-traj_ee = traj_world - pen_tip_offset
+    writing_trajectory.append([x, y, z]) # , thickness
+    m.Shape(
+        m.Sphere(radius=thickness),
+        static=True,
+        collision=False,
+        position=[x, y, z],
+        rgba=[1, 0, 0, 0.5]
+    )
+writing_trajectory = np.array(writing_trajectory)
+first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.09])
 
 # ---------------------------------------
 # Follow the generated trajectory
 # ---------------------------------------
-'''
-Need to account for FK from the ee to the tip of the pen.
-Should be a -90 degree rotation about the y axis
-'''
-H = controller.N
 
-for t in range(len(traj_ee)):
-    seg = traj_ee[t:t+H]
-    if len(seg) < H:
-        seg = np.vstack([seg, np.tile(seg[-1], (H-len(seg), 1))])
+print("IK to the first contact. ")
+controller.ik_move_to(first_point, gripper_orient_quat)
+print("Made first contact. ")
+m.step_simulation(steps=1000, realtime=True)
 
-    controller.mpc_step(seg)
-    m.step_simulation(steps=1, realtime=False)
-    time.sleep(controller.dt)
+
+
+for i in range(1000):
+    delta_z = 0.001
+    new_pos = first_point + np.array([0.0, 0.0, -delta_z * i])
+    print("desired_pos: ", new_pos)
+    target_joint_angles = robot.ik(
+            robot.end_effector,
+            target_pos=new_pos,
+            target_orient=gripper_orient_quat,
+            use_current_joint_angles=True,
+    )
+    robot.control(target_joint_angles)
+    m.step_simulation(steps=100, realtime=True)
+    controller.get_normal_force()
+
+m.step_simulation(steps=1000, realtime=True)
+
+# H = controller.N
+
+# for t in range(len(traj_ee)):
+#     seg = traj_ee[t:t+H]
+#     if len(seg) < H:
+#         seg = np.vstack([seg, np.tile(seg[-1], (H-len(seg), 1))])
+
+#     controller.mpc_step(seg)
+#     m.step_simulation(steps=1, realtime=False)
+#     time.sleep(controller.dt)
