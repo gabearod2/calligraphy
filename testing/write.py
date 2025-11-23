@@ -23,11 +23,17 @@ writing_pad = m.Shape(
     m.Box(half_extents=[0.3, 0.4, 0.01]), static=True, 
     position=[-0.1, 0, 0.745], orientation=[0, 0, 0, 1], rgba=[0, 0, 0, 0.75],
 )
-pen = m.Shape(
-    m.Box(half_extents=[0.02, 0.05, 0.02]), # m.Cylinder(radius=0.015, length=0.1), 
-    static=False, mass=1.0, position=[-0.2, -0.3, 1.5],
-    orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
-    rgba=[1, 1, 1, 1],
+# pen = m.Shape(
+#     m.Box(half_extents=[0.02, 0.05, 0.02]), # m.Cylinder(radius=0.015, length=0.1), 
+#     static=False, mass=1.0, position=[-0.2, -0.3, 1.5],
+#     orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
+#     rgba=[1, 1, 1, 1],
+# )
+
+pen = m.URDF(
+    filename=os.path.join(m.directory, 'pen', 'pen.urdf'),
+    static=False, position=[-0.2, -0.3, 1.5],
+    orientation=m.get_quaternion(euler=[0, 0, 0]),
 )
 
 # setting friction

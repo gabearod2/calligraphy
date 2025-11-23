@@ -174,9 +174,6 @@ class Controller():
         else:
             F_meas = float(np.linalg.norm(F_vec))
         
-        thickness = ref_thickness[0][0]
-        print("thickness shape: ", thickness.shape)
-        print("ref_thickness shape: ", ref_thickness[:, 0].shape)
         F_des = self.stiffness * ref_thickness[:, 0]
         F_err = F_des - F_meas
         F_dot = (F_meas - self.F_prev)/self.dt  
@@ -184,17 +181,6 @@ class Controller():
 
         self.F_prev = F_meas
         self.F_err_sum += F_err
-
-        # print statements
-        print("F_meas: ", F_meas)
-        print("F_des: ", F_des)
-        print("F_err: ", F_err)
-        print("F_err_sum: ", self.F_err_sum)
-        print("F prev: ", self.F_prev)
-        print("F_dot: ", F_dot)
-        print("dz_p: ", -self.kp_force * (F_err))
-        print("dz_d: ", -self.kd_force * (F_dot))
-        print(f"delta z: {dz} \n")
 
         # shift z reference
         ref_positions = ref_positions.copy()
