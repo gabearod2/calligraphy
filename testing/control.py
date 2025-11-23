@@ -1,6 +1,5 @@
 import numpy as np
 import mengine as m
-from scipy.optimize import minimize
 
 
 class Controller():
@@ -15,7 +14,11 @@ class Controller():
             position_weight=1.0,
             velocity_weight=0.25,
             acceleration_weight=0.1,
-            reference_weight=0.5
+            reference_weight=0.5,
+            stiffness=20000.0,
+            kp_force=7.5e-5,
+            ki_force=1e-5,
+            kd_force=5e-7
         ):
         """
         Linear, Kinematic Model Predictive Controller
@@ -36,8 +39,12 @@ class Controller():
         self.S_v, self.S_a = self._build_S_matrices()
 
         # force control parameters
-        force_weight = 0.5
-        self.Q_f = force_weight
+        self.stiffness = stiffness
+        self.kp_force = kp_force
+        self.ki_force = ki_force
+        self.kd_force = kd_force
+        self.F_prev = 100.0
+        self.F_err_sum = 0.0
 
         # weighting matrices
         self.w_p = position_weight
@@ -120,7 +127,7 @@ class Controller():
         )
         return np.array(ee_position), np.array(ee_orientation)
 
-    def _get_ee_jacobian(self, q_hat=None):
+    def get_ee_jacobian(self, q_hat=None):
         joint_states = self.robot.get_motor_joint_states()
         if q_hat is not None:
             q_gripper = joint_states[1][-2:]
@@ -159,6 +166,40 @@ class Controller():
         displacment = ee_pos - pen_tip_pos 
         ref_positions += displacment
         return ref_positions
+    
+    def apply_force_displacement(self, ref_positions, ref_thickness):
+        _, F_vec = self.get_normal_force()
+        if F_vec is None:
+            F_meas = 0.0
+        else:
+            F_meas = float(np.linalg.norm(F_vec))
+        
+        thickness = ref_thickness[0][0]
+        print("thickness shape: ", thickness.shape)
+        print("ref_thickness shape: ", ref_thickness[:, 0].shape)
+        F_des = self.stiffness * ref_thickness[:, 0]
+        F_err = F_des - F_meas
+        F_dot = (F_meas - self.F_prev)/self.dt  
+        dz = - self.kp_force * (F_err) - self.kd_force * (F_dot) - self.ki_force * (self.F_err_sum)
+
+        self.F_prev = F_meas
+        self.F_err_sum += F_err
+
+        # print statements
+        print("F_meas: ", F_meas)
+        print("F_des: ", F_des)
+        print("F_err: ", F_err)
+        print("F_err_sum: ", self.F_err_sum)
+        print("F prev: ", self.F_prev)
+        print("F_dot: ", F_dot)
+        print("dz_p: ", -self.kp_force * (F_err))
+        print("dz_d: ", -self.kd_force * (F_dot))
+        print(f"delta z: {dz} \n")
+
+        # shift z reference
+        ref_positions = ref_positions.copy()
+        ref_positions[:, 2] += dz
+        return ref_positions
 
     def mpc_step(self, ref_positions, ref_thickness):
         """ 
@@ -170,6 +211,8 @@ class Controller():
 
         # apply displacement from pen tip to end effector
         ref_positions = self.apply_pen_tip_displacement(ref_positions)
+        ref_positions = self.apply_force_displacement(ref_positions, ref_thickness)
+
         for position in ref_positions:
             m.Shape(
                 m.Sphere(radius=0.005),
@@ -178,18 +221,6 @@ class Controller():
                 position=position,
                 rgba=[0, 1, 0, 0.5]
             )
-
-        # get current normal force
-        contact_pos, normal_force_vec = self.get_normal_force()
-        if normal_force_vec is None:
-            F_n_meas = 0.0
-        else:
-            F_n_meas = float(np.linalg.norm(normal_force_vec))
-
-        # constant thickness desired
-        
-        # F_n_des = float(np.linalg.norm(self.normal_force_des))
-
 
         q_curr = self.robot.get_joint_angles(joints=self.robot.controllable_joints)
 
@@ -207,7 +238,7 @@ class Controller():
             q_hats.append(q_hat)
         
         for q_hat in q_hats:
-            J_hat, _ = self._get_ee_jacobian(q_hat=q_hat)
+            J_hat, _ = self.get_ee_jacobian(q_hat=q_hat)
             J_hats.append(J_hat)
 
         J_hats = np.array(J_hats)   
