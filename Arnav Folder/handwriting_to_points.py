@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import skimage as ski
 import mengine as m
 
-def h_to_ps(image_path, lower_bound=150, upper_bound=255):
+def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=True):
 
     # Load image
     if image_path == None:
@@ -18,27 +18,57 @@ def h_to_ps(image_path, lower_bound=150, upper_bound=255):
     binary = cv2.medianBlur(binary, 3)
 
     # Skeletonize image (basically remove line thickness and turn it into a single line)
+    # Zhang-Suen thinning
+    # TODO: Potentially explore Lee method thinning as well? Seems slightly out of the scope of the class but could add
+    # some more experimentation potential
     skel = ski.morphology.skeletonize(binary)
     skel_uint8 = (skel.astype(np.uint8))
     contours, _ = cv2.findContours(skel_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-    # Iterate through all counters and store as points
+    print(contours)
+    # Iterate through all contours and store as points
     points = []
     for c in contours:
         for p in c:
             x, y = p[0]
             points.append((x, y))
-    
-    return points
 
-# for (x, y) in points:
-#     cv2.circle(img, (x, y), 1, (0, 0, 255), -1)
+    if plot:
+        plt.figure(figsize=(10, 10))
+        plt.scatter(*zip(*points), s=1)
+        plt.gca().invert_yaxis()
+        plt.show()
+
+    xs, ys = [], []
+    for p in points:
+        if p[0] is None:  # pen up
+            xs.append(np.nan)
+            ys.append(np.nan)
+        else:
+            # Modulate point values so writing is centered around 0 and append to X and Y value arrays
+            xs.append((p[0]/3500))
+            ys.append((p[1]/3500)-0.1)
+    
+    if plot:
+        plt.plot(xs, ys, marker='.')
+        plt.gca().invert_yaxis()
+        plt.axis('equal')
+        plt.show()
+    
+    return xs, ys
+
 
 # Plot points
 def plot_points(points):
     plt.figure(figsize=(10, 10))
     plt.scatter(*zip(*points), s=1)
     plt.gca().invert_yaxis()
+    plt.show()
+
+# Plot modified points
+def plot_points_mod(xs, ys):
+    plt.plot(xs, ys, marker='.')
+    plt.gca().invert_yaxis()
+    plt.axis('equal')
     plt.show()
 
 # FInding the distance between two points in 3D space
@@ -48,30 +78,25 @@ def dist(p1, p2):
                      (p2[2] - p1[2])**2)
 
 
-points = h_to_ps("gabe_handwriting/arnav_print.jpg")
-plot_points(points)
-print(len(points))
 
-xs, ys = [], []
-for p in points:
-    if p[0] is None:  # pen up
-        xs.append(np.nan)
-        ys.append(np.nan)
-    else:
-        # Modulate point values so writing is centered around 0 and append to X and Y value arrays
-        xs.append((p[0]/3500))
-        ys.append((p[1]/3500)-0.1)
-plt.plot(xs, ys, marker='.')
-plt.gca().invert_yaxis()
-plt.axis('equal')
-plt.show()
+xs, ys = handwriting_to_points("gabe_handwriting/gabriel_print.jpg")
+# plot_points(points)
+
+# xs, ys = [], []
+# for p in points:
+#     if p[0] is None:  # pen up
+#         xs.append(np.nan)
+#         ys.append(np.nan)
+#     else:
+#         # Modulate point values so writing is centered around 0 and append to X and Y value arrays
+#         xs.append((p[0]/3500))
+#         ys.append((p[1]/3500)-0.1)
+
 
 
 target_pos = []
 for i, point in enumerate(xs):
     target_pos.append([(xs[i]), -(ys[i]), 0.8])
-
-print(len(target_pos))
 
 # Create environment and ground plane
 env = m.Env(time_step=0.1)

@@ -10,7 +10,7 @@ ground = m.Ground()
 table = m.URDF(filename=os.path.join(m.directory, 'table', 'table.urdf'), static=True, position=[0, 0, 0], orientation=[0, 0, 0, 1])
 
 # Create pen
-bowl = m.URDF(filename='bowl.urdf', static=False, position=[0,0,1], orientation=[0, 0, 0, 1])
+pen = m.URDF(filename="../mengine/assets/pen/pen.urdf", static=False, position=[0,0,1], orientation=[0, 0, 0, 1])
 
 # Create Panda manipulator
 robot = m.Robot.Panda(position=[0.5, 0, 0.75])
@@ -20,3 +20,6 @@ pos = [0, 0, 0.8]
 orient = m.get_quaternion([np.pi, 0, 0])
 target_joint_angles = robot.ik(robot.end_effector, target_pos=pos, target_orient=orient)
 robot.control(target_joint_angles, set_instantly=True)
+
+m.step_simulation(steps=10000,realtime=True)
+input("Press Enter to start the motion...")
