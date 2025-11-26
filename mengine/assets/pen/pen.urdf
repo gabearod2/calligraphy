@@ -1,26 +1,71 @@
-<?xml version="1.0" ?>
-<robot name="pen">
-  <link name="base_link">
+<?xml version="1.0"?>
+<robot name="writing_pen_box">
+
+  <!-- Main Pen Body -->
+  <link name="pen_body">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.95"/>
+      <!-- Approx inertia for a slender box -->
+      <inertia ixx="0.000083" ixy="0" ixz="0"
+               iyy="0.000083" iyz="0"
+               izz="0.0000083"/>
+    </inertial>
+
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="pen.obj" scale="0.001 0.001 0.001"/>
+        <!-- half extents: 0.01 x 0.01 x 0.05 -->
+        <box size="0.02 0.02 0.10"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0 0 1 1"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
       </material>
     </visual>
 
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="pen.obj" scale="0.001 0.001 0.001"/>
+        <box size="0.02 0.02 0.10"/>
       </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
     </collision>
 
-    <inertial>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <mass value="1.0"/> <inertia ixx="1" iyy="1" izz="1"/>
-    </inertial>
   </link>
+
+  <!-- Writing Tip -->
+  <link name="pen_tip">
+    <inertial>
+      <mass value="0.05"/>
+      <origin xyz="0 0 -0.05" rpy="0 0 0"/>
+      <!-- small spherical inertia -->
+      <inertia ixx="1e-6" ixy="0" ixz="0"
+               iyy="1e-6" iyz="0"
+               izz="1e-6"/>
+    </inertial>
+
+    <visual>
+      <geometry>
+        <sphere radius="0.015"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <sphere radius="0.015"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+  </link>
+
+  <!-- Fixed Joint -->
+  <joint name="pen_joint" type="fixed">
+    <origin xyz="0 0 -0.05" rpy="0 0 0"/>
+    <parent link="pen_body"/>
+    <child link="pen_tip"/>
+  </joint>
+
 </robot>

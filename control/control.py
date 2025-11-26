@@ -13,10 +13,11 @@ class Controller():
             dt=0.02,
             horizon=10,
             position_weight=1.0,
+            orientation_weight=1.0,
             velocity_weight=0.25,
             acceleration_weight=0.1,
             reference_weight=0.5,
-            stiffness=20000.0,
+            stiffness=10000.0,
             kp_force=7.5e-5,
             ki_force=1e-5,
             kd_force=5e-7
@@ -31,7 +32,7 @@ class Controller():
 
         # inverse kinematics controller gains
         self.robot.motor_gains = motor_gains
-        self.pen_tip_local = np.array([0.0, -0.05, 0.0]) 
+        self.pen_tip_local = np.array([0.0, 0.0, -0.065]) 
 
         # time, dof, and constant matrices
         self.n_p = horizon
@@ -44,15 +45,17 @@ class Controller():
         self.kp_force = kp_force
         self.ki_force = ki_force
         self.kd_force = kd_force
-        self.F_prev = 100.0
+        self.F_prev = 50.0
         self.F_err_sum = 0.0
 
         # weighting matrices
         self.w_p = position_weight
+        self.w_o = orientation_weight
         self.w_v = velocity_weight
         self.w_a = acceleration_weight
         self.w_q = reference_weight
         self.Q_p = self.w_p * np.eye(3)
+        self.Q_o = self.w_o * np.eye(3)
         self.Q_v = self.w_v * np.eye(self.n_dof)
         self.Q_a = self.w_a * np.eye(self.n_dof)
         self.Q_q = self.w_q * np.eye(self.n_dof)
@@ -150,6 +153,8 @@ class Controller():
         )
         J_lin = np.array(J_lin)[:, self.robot.controllable_joints]
         J_ang = np.array(J_ang)[:, self.robot.controllable_joints]
+        # print("J_ang shape", J_ang.shape)
+        # print("J_lin shape", J_lin.shape)
         return J_lin, J_ang
 
     def get_normal_force(self):
@@ -174,6 +179,8 @@ class Controller():
             F_meas = 0.0
         else:
             F_meas = float(np.linalg.norm(F_vec))
+        
+        print("current measured force: ", F_meas)
         
         F_des = self.stiffness * ref_thickness[:, 0]
         F_err = F_des - F_meas
@@ -213,7 +220,8 @@ class Controller():
 
         # Build reference for linearization with current pose as starting point. 
         q_hats = []
-        J_hats = []
+        J_hats_p = []
+        J_hats_o = []
         q_hats.append(q_curr) # q_0 = q
         for k in range(n_p-1):
             q_hat = self.robot.ik(
@@ -225,10 +233,12 @@ class Controller():
             q_hats.append(q_hat)
         
         for q_hat in q_hats:
-            J_hat, _ = self.get_ee_jacobian(q_hat=q_hat)
-            J_hats.append(J_hat)
+            J_hat_p, J_hat_o = self.get_ee_jacobian(q_hat=q_hat)
+            J_hats_p.append(J_hat_p)
+            J_hats_o.append(J_hat_o)
 
-        J_hats = np.array(J_hats)   
+        J_hats_p = np.array(J_hats_p)
+        J_hats_o = np.array(J_hats_o)   
         q_hats = np.array(q_hats)  
 
         # Total Q and p
@@ -237,10 +247,11 @@ class Controller():
 
         # Get Q and p along horizon
         for k in range(n_p):
-            Jk = J_hats[k] # (3, n)
+            Jk_p = J_hats_p[k] # (3, n)
+            Jk_o = J_hats_o[k] # (3, n)
             q_hat_k = q_hats[k] # (n,)
 
-            A_k = Jk.T @ self.Q_p @ Jk # (n, n)
+            A_k = Jk_p.T @ self.Q_p @ Jk_p + Jk_o.T @ self.Q_o @ Jk_o  # (n, n)
             A_k_full = A_k + self.Q_q 
             p_k = -A_k @ q_hat_k - self.Q_q @ q_hat_k
 
