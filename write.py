@@ -2,8 +2,9 @@ import os
 import time
 import numpy as np
 import mengine as m
-import control as c
-
+import control.control as c
+import scipy.spatial.transform as sst
+from trajectory_generation.handwriting_to_points import handwriting_to_points
 
 # ---------------------------------------
 # Defining environment
@@ -23,18 +24,18 @@ writing_pad = m.Shape(
     m.Box(half_extents=[0.3, 0.4, 0.01]), static=True, 
     position=[-0.1, 0, 0.745], orientation=[0, 0, 0, 1], rgba=[0, 0, 0, 0.75],
 )
-# pen = m.Shape(
-#     m.Box(half_extents=[0.02, 0.05, 0.02]), # m.Cylinder(radius=0.015, length=0.1), 
-#     static=False, mass=1.0, position=[-0.2, -0.3, 1.5],
-#     orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
-#     rgba=[1, 1, 1, 1],
-# )
-
-pen = m.URDF(
-    filename=os.path.join(m.directory, 'pen', 'pen.urdf'),
-    static=False, position=[-0.2, -0.3, 1.5],
-    orientation=m.get_quaternion(euler=[0, 0, 0]),
+pen = m.Shape(
+    m.Box(half_extents=[0.02, 0.05, 0.02]), # m.Cylinder(radius=0.015, length=0.1), 
+    static=False, mass=1.0, position=[-0.2, -0.3, 1.5],
+    orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
+    rgba=[1, 1, 1, 1],
 )
+
+# pen = m.URDF(
+#     filename=os.path.join(m.directory, 'pen', 'pen.urdf'),
+#     static=False, position=[-0.2, -0.3, 1.5],
+#     orientation=m.get_quaternion(euler=[0, 0, 0]),
+# )
 
 # setting friction
 writing_pad.set_whole_body_frictions(
@@ -128,24 +129,64 @@ controller.ik_move_to(lift_pos, gripper_orient_quat)
 print("Generating the writing trajectory.")
 writing_trajectory = []
 thickness_trajectory = []
-for i in range(50):
-    x = -0.3 
-    y = -0.2 + i * 0.01
+
+
+# # Testing staight-line trajectory
+# for i in range(50):
+#     x = -0.3 
+#     y = -0.2 + i * 0.01
+#     z = 0.755
+#     thickness = 0.005
+#     writing_trajectory.append([x, y, z])
+#     thickness_trajectory.append([thickness])
+#     m.Shape(
+#         m.Sphere(radius=thickness),
+#         static=True,
+#         collision=False,
+#         position=[x, y, z],
+#         rgba=[1, 0, 0, 0.5]
+#     )
+
+# Generating handwriting points
+xs, ys = handwriting_to_points(
+    image_path="trajectory_generation/handwriting/gabriel_print.jpg",
+    plot=False,
+)
+
+# rotating handwriting points
+xs = np.array(xs)
+ys = np.array(ys)
+xs_centered = xs - np.mean(xs)
+ys_centered = ys - np.mean(ys)
+rot = sst.Rotation.from_euler("zyx", [-np.pi/2, 0, np.pi])
+R = rot.as_matrix()
+X = np.array([xs_centered, ys_centered, np.zeros_like(xs_centered)])
+
+# plotting in simulator and adding to writing_trajectory list
+for i in range(len(xs)):
+    xi = R @ X[:, i].T
+
+    x = xi[0] - 0.2
+    y = xi[1]
     z = 0.755
     thickness = 0.005
-
     writing_trajectory.append([x, y, z])
     thickness_trajectory.append([thickness])
-    m.Shape(
-        m.Sphere(radius=thickness),
-        static=True,
-        collision=False,
-        position=[x, y, z],
-        rgba=[1, 0, 0, 0.5]
-    )
+    if i % 20 == 0:
+        m.Shape(
+            m.Sphere(radius=thickness),
+            static=True,
+            collision=False,
+            position=[x, y, z],
+            rgba=[1, 0, 0, 0.5]
+        )
+
 writing_trajectory = np.array(writing_trajectory)
 thickness_trajectory = np.array(thickness_trajectory)
 first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.05])
+
+# TODO: sort the writing trajectory to get a smooth trajectory from the 
+# start of the word to the end of the word.
 
 # ---------------------------------------
 # Follow the generated trajectory
