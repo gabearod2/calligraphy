@@ -10,14 +10,14 @@ import mengine as m
 
 # plot argument is passed as False by default, set to True if you would like plots displayed for debugging or visual feedbacks
 def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=False):
-
-    # --- Load image --- #
-    if image_path == None:
+    if image_path is None:
         raise ValueError("Please specify a path")
     
+    
+    # --- Load image --- #
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img == None:
-        raise ValueError(f"Couldn't load image at {image_path}")
+    if img is None:
+        raise ValueError(f"Could not load image at {image_path}")
 
     # --- Convert to black and white --- #
     _, binary = cv2.threshold(img, lower_bound, upper_bound, cv2.THRESH_BINARY_INV)
@@ -33,12 +33,16 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
     skel = ski.morphology.skeletonize(binary)
     skel_uint8 = (skel.astype(np.uint8))
     contours, _ = cv2.findContours(skel_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    print("found contours")
+    print(f"Found {len(contours)} contours")
+
+    # --- Sort letters in left to right order --- #
+    if len(contours) > 0:
+        contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
 
     # --- Iterate through all contours and store as points, thicknesses --- #
     points = []
     thicknesses = []
-    for c in contours:
+    for i, c in enumerate(contours):
         for p in c:
             x, y = p[0]
             points.append((x, y))
@@ -46,7 +50,11 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
             r = dist_map[y,x]
             thicknesses.append(r*2)
 
-    # --- Plot results --- #
+        if i < len(contours) - 1:
+            points.append((None, None))     # Set values to (None, None) to trigger pen lift at end of letter
+            thicknesses.append(0)           # Thickness set to 0 when pen lifted
+
+    # --- Plot thickness results --- #
     if plot:
         plt.figure(figsize=(14, 6))
 
@@ -76,8 +84,33 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
         plt.tight_layout()
         plt.show()
 
+    # --- Plot time visualization --- #
+    if plot:
+        # Filter out None values for plotting (Matplotlib can't scatter None)
+        valid_points = [p for p in points if p[0] is not None]
+        valid_thicknesses = [t for t in thicknesses if t > 0]
+        
+        # Calculate sizes for the "stroke reconstruction" style plot
+        sizes = (np.array(valid_thicknesses) ** 2) * 0.05
+
+        plt.figure(figsize=(14, 6))
+
+        # Plot: Reconstructed Stroke
+        plt.title("Sorted Left-to-Right Execution")
+        
+        # We plot a gradient of colors to prove the order is correct
+        # Blue = Start, Red = End
+        time_colors = np.arange(len(valid_points))
+        
+        plt.scatter(*zip(*valid_points), s=sizes, c=time_colors, cmap='copper', alpha=0.6)
+        plt.colorbar(label='Execution Order (Blue->Red)')
+        plt.gca().invert_yaxis()
+        plt.axis('equal')
+        
+        plt.show()
+
     xs, ys, ts = [], [], []
-    for p in points:
+    for i, p in enumerate(points):
         if p[0] is None:  # pen up
             xs.append(np.nan)
             ys.append(np.nan)
@@ -102,7 +135,7 @@ if __name__ == "__main__":
     print("Testing Handwriting Tracjectory Generation")
 
     # --- Generate points to track --- #
-    xs, ys = handwriting_to_points("handwriting/gabriel_print.jpg")
+    xs, ys, ts = handwriting_to_points("handwriting/gabriel_print.jpg", plot=True)
 
     target_pos = []
     for i, point in enumerate(xs):
