@@ -22,18 +22,11 @@ table = m.URDF(
 )
 writing_pad = m.Shape(
     m.Box(half_extents=[0.3, 0.4, 0.01]), static=True, 
-    position=[-0.1, 0, 0.745], orientation=[0, 0, 0, 1], rgba=[0, 0, 0, 0.75],
+    position=[-0.1, 0, 0.745], orientation=[0, 0, 0, 1], rgba=[0, 0, 0, 1],
 )
-# pen = m.Shape(
-#     m.Box(half_extents=[0.02, 0.05, 0.02]), # m.Cylinder(radius=0.015, length=0.1), 
-#     static=False, mass=1.0, position=[-0.2, -0.3, 1.5],
-#     orientation=m.get_quaternion(euler=[0, np.pi/2, 0]),
-#     rgba=[1, 1, 1, 1],
-# )
-
 pen = m.URDF(
     filename=os.path.join(m.directory, 'pen', 'pen.urdf'),
-    static=False, position=[-0.2, -0.3, 1.5],
+    static=False, position=[-0.25, -0.3, 1.5],
     orientation=m.get_quaternion(euler=[0, np.pi/2, np.pi/2]),
 )
 
@@ -67,6 +60,7 @@ controller = c.Controller(
     dt=0.02,
     horizon=10,
     position_weight=1.0,
+    orientation_weight=1.0,
     velocity_weight=0.1,
     acceleration_weight=0.1,
     reference_weight=0.5
@@ -94,7 +88,7 @@ robot.set_gripper_position([1]*2, set_instantly=True)
 pen_pos, pen_orient = pen.get_base_pos_orient()
 pen_euler = m.get_euler(pen_orient)
 pen_yaw = pen_euler[-1]
-gripper_euler = default_euler + [np.pi/2, 0, -np.pi/2]
+gripper_euler = default_euler + [np.pi/2, -np.pi/4, -np.pi/2]
 gripper_orient_quat = m.get_quaternion(gripper_euler)
 
 # move to pre-grasp pose
@@ -103,7 +97,7 @@ pre_grasp_pos = pen_pos + pre_grasp_offset
 controller.ik_move_to(pre_grasp_pos, gripper_orient_quat)
 
 # move to grasp pose
-grasp_offset = np.array([0.0, 0.015, -0.0065])
+grasp_offset = np.array([0.0, 0.0, -0.0055])
 grasp_pos = pen_pos + grasp_offset
 controller.ik_move_to(grasp_pos, gripper_orient_quat)
 
@@ -118,7 +112,7 @@ lift_pos = pen_pos + lift_offset
 controller.ik_move_to(lift_pos, gripper_orient_quat)
 
 # rotate to writing orientation
-gripper_euler = default_euler + [np.pi/2, np.pi/2, 0]
+gripper_euler = default_euler + [np.pi/2, np.pi/4, 0]
 gripper_orient_quat = m.get_quaternion(gripper_euler)
 controller.ik_move_to(lift_pos, gripper_orient_quat)
 
@@ -127,92 +121,107 @@ controller.ik_move_to(lift_pos, gripper_orient_quat)
 # ---------------------------------------
 
 print("Generating the writing trajectory.")
-writing_trajectory = []
-thickness_trajectory = []
+thickness_scale = 10000
+writing_pad_z = 0.755
+x_displacement = -0.1
 
 
 # # Testing staight-line trajectory
-for i in range(50):
-    x = -0.3 
-    y = -0.2 + i * 0.01
-    z = 0.755
-    thickness = 0.005
-    writing_trajectory.append([x, y, z])
-    thickness_trajectory.append([thickness])
-    m.Shape(
-        m.Sphere(radius=thickness),
-        static=True,
-        collision=False,
-        position=[x, y, z],
-        rgba=[1, 0, 0, 0.5]
-    )
-
-# Generating handwriting points
-# xs, ys = handwriting_to_points(
-#     image_path="trajectory_generation/handwriting/gabriel_print.jpg",
-#     plot=False,
-# )
-
-# # rotating handwriting points
-# xs = np.array(xs)
-# ys = np.array(ys)
-# xs_centered = xs - np.mean(xs)
-# ys_centered = ys - np.mean(ys)
-# rot = sst.Rotation.from_euler("zyx", [-np.pi/2, 0, np.pi])
-# R = rot.as_matrix()
-# X = np.array([xs_centered, ys_centered, np.zeros_like(xs_centered)])
-
-# # plotting in simulator and adding to writing_trajectory list
-# for i in range(len(xs)):
-#     xi = R @ X[:, i].T
-
-#     x = xi[0] - 0.2
-#     y = xi[1]
+# for i in range(50):
+#     x = -0.3 
+#     y = -0.2 + i * 0.01
 #     z = 0.755
 #     thickness = 0.005
 #     writing_trajectory.append([x, y, z])
 #     thickness_trajectory.append([thickness])
-#     if i % 20 == 0:
-#         m.Shape(
-#             m.Sphere(radius=thickness),
-#             static=True,
-#             collision=False,
-#             position=[x, y, z],
-#             rgba=[1, 0, 0, 0.5]
-#         )
+#     m.Shape(
+#         m.Sphere(radius=thickness),
+#         static=True,
+#         collision=False,
+#         position=[x, y, z],z
+#         rgba=[1, 0, 0, 0.5]
+#     )
 
-writing_trajectory = np.array(writing_trajectory)
-thickness_trajectory = np.array(thickness_trajectory)
-first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.08])
+# Generating handwriting points
+Xs, Ys, Ts, num_letters = handwriting_to_points(
+    image_path="trajectory_generation/handwriting/gabriel_print.jpg",
+    plot=False,
+)
 
-# TODO: sort the writing trajectory to get a smooth trajectory from the 
-# start of the word to the end of the word.
+# Find global means
+all_xs = np.concatenate([np.array(xs) for xs in Xs])
+all_ys = np.concatenate([np.array(ys) for ys in Ys])
+global_x_mean = np.nanmean(all_xs)
+global_y_mean = np.nanmean(all_ys)
 
-# ---------------------------------------
-# Follow the generated trajectory
-# ---------------------------------------
+for xs, ys, ts in zip(Xs, Ys, Ts):
+    writing_trajectory = []
+    thickness_trajectory = []
+    
+    # rotating handwriting points
+    xs = np.array(xs)
+    ys = np.array(ys)
+    ts = np.array(ts)/thickness_scale
+    valid_xs = xs[~np.isnan(xs)]
+    valid_ys = ys[~np.isnan(ys)]
+    xs_centered = valid_xs - global_x_mean
+    ys_centered = valid_ys - global_y_mean
+    rot = sst.Rotation.from_euler("zyx", [-np.pi/2, 0, np.pi])
+    R = rot.as_matrix()
+    X = np.array([xs_centered, ys_centered, np.zeros_like(xs_centered)])
 
-print("IK to above the first writing waypoint. ")
-controller.ik_move_to(first_point, gripper_orient_quat)
-m.step_simulation(steps=100, realtime=True)
-print("Now, move down until first contact. ")
-controller.move_to_first_contact(first_point, gripper_orient_quat)
-print("Made contact. ")
+    # plotting in simulator and adding to writing_trajectory list
+    for i in range(len(valid_xs)):
+        xi = R @ X[:, i].T
+        x = xi[0] + x_displacement
+        y = xi[1] 
+        t = ts[i]
+        z = writing_pad_z
 
-print("Starting MPC.")
-H = controller.n_p  
-N = len(writing_trajectory)
-for k in range(N):
-    # pull segments
-    writing_seg = writing_trajectory[k : k + H].copy()
-    thickness_seg = thickness_trajectory[k : k + H].copy()
+        writing_trajectory.append([x, y, z])
+        thickness_trajectory.append([t])
+        if i % 20 == 0:
+            m.Shape(
+                m.Sphere(radius=t),
+                static=True,
+                collision=False,
+                position=[x, y, z],
+                rgba=[1, 1, 1, 0.25]
+            )
 
-    # pad if needed
-    if len(thickness_seg) < H:
-        pad_count = H - len(thickness_seg)
-        thickness_seg = np.vstack([thickness_seg, np.tile(thickness_seg[-1], (pad_count, 1))])
-        writing_seg = np.vstack([writing_seg, np.tile(writing_seg[-1], (pad_count, 1))])
+    print("Finished plotting desired handwiring trajectory in the simulator.")
+    writing_trajectory = np.array(writing_trajectory)
+    thickness_trajectory = np.array(thickness_trajectory)
+    first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.08])
+    # next_first_point = 
 
-    # run mpc for this window
-    controller.mpc_step(writing_seg, thickness_seg)
-    m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+    # ---------------------------------------
+    # Follow the generated trajectory
+    # ---------------------------------------
+
+    print("IK to above the first writing waypoint. ")
+    controller.ik_move_to(first_point, gripper_orient_quat)
+    m.step_simulation(steps=100, realtime=True)
+    print("Now, move down until first contact. ")
+    controller.move_to_first_contact(first_point, gripper_orient_quat)
+    print("Made contact. ")
+
+    print("Starting MPC.")
+    H = controller.n_p  
+    N = len(writing_trajectory)
+    for k in range(N):
+        # pull segments
+        writing_seg = writing_trajectory[k : k + H].copy()
+        thickness_seg = thickness_trajectory[k : k + H].copy()
+
+        # pad if needed
+        if len(thickness_seg) < H:
+            pad_count = H - len(thickness_seg)
+            thickness_seg = np.vstack([thickness_seg, np.tile(thickness_seg[-1], (pad_count, 1))])
+            writing_seg = np.vstack([writing_seg, np.tile(writing_seg[-1], (pad_count, 1))])
+
+        # run mpc for this window
+        controller.mpc_step(writing_seg, thickness_seg)
+        m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+
+    

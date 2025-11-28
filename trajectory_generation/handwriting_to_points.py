@@ -33,7 +33,7 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
     skel = ski.morphology.skeletonize(binary)
     skel_uint8 = (skel.astype(np.uint8))
     contours, _ = cv2.findContours(skel_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    print(f"Found {len(contours)} contours")
+    print(f"Found {len(contours)} contours. ")
 
     # --- Sort letters in left to right order --- #
     if len(contours) > 0:
@@ -53,6 +53,44 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
         if i < len(contours) - 1:
             points.append((None, None))     # Set values to (None, None) to trigger pen lift at end of letter
             thicknesses.append(0)           # Thickness set to 0 when pen lifted
+    
+    contour_groups = []
+    contour_thickness_groups = []
+    current_group = []
+    current_tgroup = []
+
+    for i, p in enumerate(points):
+        if p[0] is None:   # pen break
+            if len(current_group) > 0:
+                contour_groups.append(current_group)
+                contour_thickness_groups.append(current_tgroup)
+                current_group = []
+                current_tgroup = []
+        else:
+            current_group.append(p)
+            current_tgroup.append(thicknesses[i])
+
+    # catch last contour
+    if len(current_group) > 0:
+        contour_groups.append(current_group)
+        contour_thickness_groups.append(current_tgroup)
+
+    # --- Build grouped xs, ys, ts --- #
+    xs_by_contour = []
+    ys_by_contour = []
+    ts_by_contour = []
+
+    for group_pts, group_ts in zip(contour_groups, contour_thickness_groups):
+        xs_sub = []
+        ys_sub = []
+        ts_sub = []
+        for (x, y), t in zip(group_pts, group_ts):
+            xs_sub.append(x / 3500)
+            ys_sub.append(y / 3500 - 0.1)
+            ts_sub.append(t)
+        xs_by_contour.append(xs_sub)
+        ys_by_contour.append(ys_sub)
+        ts_by_contour.append(ts_sub)
 
     # --- Plot thickness results --- #
     if plot:
@@ -120,9 +158,9 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
             ys.append((p[1]/3500)-0.1)
             ts.append(thicknesses[i])
 
-    print("trajectory generation done.")
+    print("Trajectory generation completed.")
     
-    return xs, ys, ts
+    return xs_by_contour, ys_by_contour, ts_by_contour, len(contours)
 
 # --- Finding the distance between two points in 3D space --- #
 def dist(p1, p2):

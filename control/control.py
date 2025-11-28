@@ -17,7 +17,7 @@ class Controller():
             velocity_weight=0.25,
             acceleration_weight=0.1,
             reference_weight=0.5,
-            stiffness=10000.0,
+            stiffness=2000.0,
             kp_force=7.5e-5,
             ki_force=1e-5,
             kd_force=5e-7
@@ -45,7 +45,8 @@ class Controller():
         self.kp_force = kp_force
         self.ki_force = ki_force
         self.kd_force = kd_force
-        self.F_prev = 50.0
+        self.contact_pz = None
+        self.F_prev = 10.0
         self.F_err_sum = 0.0
 
         # weighting matrices
@@ -153,8 +154,6 @@ class Controller():
         )
         J_lin = np.array(J_lin)[:, self.robot.controllable_joints]
         J_ang = np.array(J_ang)[:, self.robot.controllable_joints]
-        # print("J_ang shape", J_ang.shape)
-        # print("J_lin shape", J_lin.shape)
         return J_lin, J_ang
 
     def get_normal_force(self):
@@ -169,12 +168,12 @@ class Controller():
         R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)
         pen_tip_pos= pen_pos + R @ self.pen_tip_local
         ee_pos, _ = self.get_ee_pose()
-        displacment = ee_pos - pen_tip_pos 
-        ref_positions += displacment
-        return ref_positions
+        displacement = ee_pos - pen_tip_pos 
+        ref_positions += displacement
+        return pen_tip_pos, ref_positions
     
-    def apply_force_displacement(self, ref_positions, ref_thickness):
-        _, F_vec = self.get_normal_force()
+    def apply_force_displacement(self, pos_curr, ref_positions, ref_thickness):
+        contact_p, F_vec = self.get_normal_force()
         if F_vec is None:
             F_meas = 0.0
         else:
@@ -201,20 +200,20 @@ class Controller():
         """        
         n_p = self.n_p
         n_dof = self.n_dof
-        _, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
+        pos_curr, orient_curr = self.robot.get_link_pos_orient(self.robot.end_effector)
 
         # apply displacement from pen tip to end effector
-        ref_positions = self.apply_pen_tip_displacement(ref_positions)
-        ref_positions = self.apply_force_displacement(ref_positions, ref_thickness)
+        pen_tip_pos, ref_positions = self.apply_pen_tip_displacement(ref_positions)
+        ref_positions = self.apply_force_displacement(pen_tip_pos, ref_positions, ref_thickness)
 
-        for position in ref_positions:
-            m.Shape(
-                m.Sphere(radius=0.005),
-                static=True,
-                collision=False,
-                position=position,
-                rgba=[0, 1, 0, 0.5]
-            )
+        # for position in ref_positions:
+        #     m.Shape(
+        #         m.Sphere(radius=0.005),
+        #         static=True,
+        #         collision=False,
+        #         position=position,
+        #         rgba=[0, 1, 0, 0.5]
+        #     )
 
         q_curr = self.robot.get_joint_angles(joints=self.robot.controllable_joints)
 
@@ -247,8 +246,8 @@ class Controller():
 
         # Get Q and p along horizon
         for k in range(n_p):
-            Jk_p = J_hats_p[k] # (3, n)
-            Jk_o = J_hats_o[k] # (3, n)
+            Jk_p =  J_hats_p[k] # (3, n)
+            Jk_o =  J_hats_o[k] # (3, n)
             q_hat_k = q_hats[k] # (n,)
 
             A_k = Jk_p.T @ self.Q_p @ Jk_p + Jk_o.T @ self.Q_o @ Jk_o  # (n, n)
@@ -287,6 +286,7 @@ if __name__ == "__main__":
     # ---------------------------------------
     # Defining environment
     # ---------------------------------------
+    import control as c
 
     env = m.Env(time_step=0.02, seed=300)
     ground = m.Ground()
