@@ -121,7 +121,7 @@ controller.ik_move_to(lift_pos, gripper_orient_quat)
 # ---------------------------------------
 
 print("Generating the writing trajectory.")
-thickness_scale = 10000
+thickness_scale = 5000
 writing_pad_z = 0.755
 x_displacement = -0.1
 
@@ -157,7 +157,7 @@ global_y_mean = np.nanmean(all_ys)
 for xs, ys, ts in zip(Xs, Ys, Ts):
     writing_trajectory = []
     thickness_trajectory = []
-    
+
     # rotating handwriting points
     xs = np.array(xs)
     ys = np.array(ys)

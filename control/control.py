@@ -18,9 +18,9 @@ class Controller():
             acceleration_weight=0.1,
             reference_weight=0.5,
             stiffness=2000.0,
-            kp_force=7.5e-5,
-            ki_force=1e-5,
-            kd_force=5e-7
+            kp_force=1.5e-5,
+            ki_force=0e-7,
+            kd_force=1e-8
         ):
         """
         Linear, Kinematic Model Predictive Controller
@@ -45,8 +45,8 @@ class Controller():
         self.kp_force = kp_force
         self.ki_force = ki_force
         self.kd_force = kd_force
-        self.contact_pz = None
-        self.F_prev = 10.0
+        self.contact_pz = 0.755
+        self.F_prev = 0.0
         self.F_err_sum = 0.0
 
         # weighting matrices
@@ -166,28 +166,47 @@ class Controller():
     def apply_pen_tip_displacement(self, ref_positions):
         pen_pos, pen_orient = self.pen.get_base_pos_orient()
         R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)
-        pen_tip_pos= pen_pos + R @ self.pen_tip_local
+        pen_tip_pos = pen_pos + R @ self.pen_tip_local
         ee_pos, _ = self.get_ee_pose()
         displacement = ee_pos - pen_tip_pos 
         ref_positions += displacement
         return pen_tip_pos, ref_positions
     
-    def apply_force_displacement(self, pos_curr, ref_positions, ref_thickness):
+    def apply_force_displacement(self, pen_tip_pos, ref_positions, ref_thickness):
+        print("\nForce Control Debugging")
         contact_p, F_vec = self.get_normal_force()
-        if F_vec is None:
-            F_meas = 0.0
+
+        print("contact_p: ", contact_p)
+        print("F_vec: ", F_vec)
+        if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
+            print("self.contact_pz: ", self.contact_pz)
+            print("pen_tip_pos: ", pen_tip_pos)
+            F_meas = self.stiffness*(self.contact_pz - pen_tip_pos[2])
         else:
+            self.contact_pz = contact_p[2]
             F_meas = float(np.linalg.norm(F_vec))
-        
-        print("current measured force: ", F_meas)
+            m.Shape(
+                m.Sphere(radius=F_meas/self.stiffness/1.5),
+                static=True,
+                collision=False,
+                position=contact_p,
+                rgba=[0, 1, 0, 0.5]
+            )
+        print("F_meas: ", F_meas)
         
         F_des = self.stiffness * ref_thickness[:, 0]
+        print("F_des: ", F_des)
         F_err = F_des - F_meas
-        F_dot = (F_meas - self.F_prev)/self.dt  
+        print("F_err: ", F_err)
+        F_dot = (F_meas - self.F_prev)/self.dt 
+        print("F_dot: ", F_dot) 
         dz = - self.kp_force * (F_err) - self.kd_force * (F_dot) - self.ki_force * (self.F_err_sum)
+        print("dz: ", dz)
 
         self.F_prev = F_meas
+        print("self.F_prev: ", self.F_prev)
         self.F_err_sum += F_err
+        print("self.F_err_sum: ", self.F_err_sum)
 
         # shift z reference
         ref_positions = ref_positions.copy()
@@ -207,13 +226,7 @@ class Controller():
         ref_positions = self.apply_force_displacement(pen_tip_pos, ref_positions, ref_thickness)
 
         # for position in ref_positions:
-        #     m.Shape(
-        #         m.Sphere(radius=0.005),
-        #         static=True,
-        #         collision=False,
-        #         position=position,
-        #         rgba=[0, 1, 0, 0.5]
-        #     )
+        #     
 
         q_curr = self.robot.get_joint_angles(joints=self.robot.controllable_joints)
 
