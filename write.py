@@ -11,7 +11,7 @@ from trajectory_generation.handwriting_to_points import handwriting_to_points
 # Control type and logging for evaluation
 # ---------------------------------------
 
-mode = "ik" # "ik" "mpc" "mpc_f"
+mode = "mpc_f" # "ik" "mpc" "mpc_f"
 pos_des_hist = []
 pos_meas_hist = []
 thick_des_hist = []
@@ -27,8 +27,8 @@ ground = m.Ground()
 m.visualize_coordinate_frame()
 env.set_gui_camera(
     pitch=-30,
-    distance=0.75,
-    yaw=-15
+    distance=0.6,
+    yaw=-60
 )
 
 # world objects 
@@ -305,6 +305,9 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
             thick_des_hist.append(thick_des)
             thick_meas_hist.append(thick_meas)
 
+controller.ik_move_to(lift_pos, gripper_orient_quat)
+m.step_simulation(steps=10000, realtime=True)
+
 # error calculation
 pos_des_hist = np.array(pos_des_hist)      
 pos_meas_hist = np.array(pos_meas_hist)    
@@ -338,4 +341,5 @@ np.savez(f"results_{mode}.npz",
          rmse_pos=rmse_pos,
          rmse_thick=rmse_thick)
 
-    
+
+
