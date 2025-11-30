@@ -81,6 +81,12 @@ class Controller():
         """
         IK-based move
         """
+        pen_pos, pen_orient = self.pen.get_base_pos_orient()
+        R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)
+        pen_tip_pos = pen_pos + R @ self.pen_tip_local
+        ee_pos, _ = self.get_ee_pose()
+        displacement = ee_pos - pen_tip_pos 
+        pos += displacement
         target_joint_angles = self.robot.ik(
             self.robot.end_effector,
             target_pos=pos,
@@ -88,22 +94,19 @@ class Controller():
             use_current_joint_angles=True,
         )
         self.robot.control(target_joint_angles, set_instantly=set_instantly)
-        while np.linalg.norm(
-            self.robot.get_joint_angles(self.robot.controllable_joints) - target_joint_angles
-        ) > 0.03:
-            contact_p, F_vec = self.get_normal_force()
-            if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
-                F_meas = 0
-            else:
-                F_meas = float(np.linalg.norm(F_vec))
-                m.Shape(
-                    m.Sphere(radius=F_meas/self.stiffness/1.5),
-                    static=True,
-                    collision=False,
-                    position=contact_p,
-                    rgba=[0, 1, 0, 0.5]
-                )
-            m.step_simulation(realtime=True)
+        contact_p, F_vec = self.get_normal_force()
+        if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
+            F_meas = 0
+        else:
+            F_meas = float(np.linalg.norm(F_vec))
+            m.Shape(
+                m.Sphere(radius=F_meas/self.stiffness/1.5),
+                static=True,
+                collision=False,
+                position=contact_p,
+                rgba=[0, 1, 0, 0.5]
+            )
+        m.step_simulation(steps=4, realtime=True)
 
     def move_to_first_contact(self, pos, orient):
         """

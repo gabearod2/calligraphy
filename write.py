@@ -11,7 +11,7 @@ from trajectory_generation.handwriting_to_points import handwriting_to_points
 # Control type and logging for evaluation
 # ---------------------------------------
 
-mode = "mpc_f" # "ik" "mpc" "mpc_f"
+mode = "ik" # "ik" "mpc" "mpc_f"
 pos_des_hist = []
 pos_meas_hist = []
 thick_des_hist = []
