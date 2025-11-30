@@ -10,6 +10,8 @@ from trajectory_generation.handwriting_to_points import handwriting_to_points
 # Defining environment
 # ---------------------------------------
 
+mode = "mpc" # "ik" "mpc" "mpc_f"
+
 sim_dt = 0.005
 env = m.Env(time_step=sim_dt, seed=300)
 ground = m.Ground()
@@ -189,11 +191,10 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
                 rgba=[1, 1, 1, 0.25]
             )
 
-    print("Finished plotting desired handwiring trajectory in the simulator.")
+    print("Finished plotting the desired contour.")
     writing_trajectory = np.array(writing_trajectory)
     thickness_trajectory = np.array(thickness_trajectory)
-    first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.08])
-    # next_first_point = 
+    first_point = writing_trajectory[0] + np.array([0.0, 0.0, 0.06]) 
 
     # ---------------------------------------
     # Follow the generated trajectory
@@ -206,22 +207,60 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
     controller.move_to_first_contact(first_point, gripper_orient_quat)
     print("Made contact. ")
 
-    print("Starting MPC.")
-    H = controller.n_p  
-    N = len(writing_trajectory)
-    for k in range(N):
-        # pull segments
-        writing_seg = writing_trajectory[k : k + H].copy()
-        thickness_seg = thickness_trajectory[k : k + H].copy()
 
-        # pad if needed
-        if len(thickness_seg) < H:
-            pad_count = H - len(thickness_seg)
-            thickness_seg = np.vstack([thickness_seg, np.tile(thickness_seg[-1], (pad_count, 1))])
-            writing_seg = np.vstack([writing_seg, np.tile(writing_seg[-1], (pad_count, 1))])
+    if mode=="mpc_f":
+        force = True
 
-        # run mpc for this window
-        controller.mpc_step(writing_seg, thickness_seg)
-        m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+        print("Starting MPC with Force Control.")
+        H = controller.n_p  
+        N = len(writing_trajectory)
+        for k in range(N):
+            # pull segments
+            writing_seg = writing_trajectory[k : k + H].copy()
+            thickness_seg = thickness_trajectory[k : k + H].copy()
+
+            # pad if needed
+            if len(thickness_seg) < H:
+                pad_count = H - len(thickness_seg)
+                thickness_seg = np.vstack([thickness_seg, np.tile(thickness_seg[-1], (pad_count, 1))])
+                writing_seg = np.vstack([writing_seg, np.tile(writing_seg[-1], (pad_count, 1))])
+
+            # run mpc for this window
+            controller.mpc_step(writing_seg, thickness_seg, force)
+            m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+    
+    elif mode=="mpc":
+        force = False
+
+        print("Starting MPC without Force Control.")
+        H = controller.n_p  
+        N = len(writing_trajectory)
+        for k in range(N):
+            # pull segments
+            writing_seg = writing_trajectory[k : k + H].copy()
+            thickness_seg = thickness_trajectory[k : k + H].copy()
+
+            # pad if needed
+            if len(thickness_seg) < H:
+                pad_count = H - len(thickness_seg)
+                thickness_seg = np.vstack([thickness_seg, np.tile(thickness_seg[-1], (pad_count, 1))])
+                writing_seg = np.vstack([writing_seg, np.tile(writing_seg[-1], (pad_count, 1))])
+
+            # run mpc for this window
+            controller.mpc_step(writing_seg, thickness_seg, force)
+            m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+    
+    elif mode=="ik":
+        force = False
+
+        print("Starting Inverse Kinematic Controller.")
+        N = len(writing_trajectory)
+        for k in range(N):
+            writing_point = writing_trajectory[k]
+
+            # run ik controller
+            controller.ik_move_to_write(writing_point, gripper_orient_quat)
+
+    
 
     

@@ -77,6 +77,34 @@ class Controller():
         ) > 0.03:
             m.step_simulation(realtime=True)
 
+    def ik_move_to_write(self, pos, orient, set_instantly=False):
+        """
+        IK-based move
+        """
+        target_joint_angles = self.robot.ik(
+            self.robot.end_effector,
+            target_pos=pos,
+            target_orient=orient,
+            use_current_joint_angles=True,
+        )
+        self.robot.control(target_joint_angles, set_instantly=set_instantly)
+        while np.linalg.norm(
+            self.robot.get_joint_angles(self.robot.controllable_joints) - target_joint_angles
+        ) > 0.03:
+            contact_p, F_vec = self.get_normal_force()
+            if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
+                F_meas = 0
+            else:
+                F_meas = float(np.linalg.norm(F_vec))
+                m.Shape(
+                    m.Sphere(radius=F_meas/self.stiffness/1.5),
+                    static=True,
+                    collision=False,
+                    position=contact_p,
+                    rgba=[0, 1, 0, 0.5]
+                )
+            m.step_simulation(realtime=True)
+
     def move_to_first_contact(self, pos, orient):
         """
         IK-based move till contact
@@ -172,15 +200,9 @@ class Controller():
         ref_positions += displacement
         return pen_tip_pos, ref_positions
     
-    def apply_force_displacement(self, pen_tip_pos, ref_positions, ref_thickness):
-        print("\nForce Control Debugging")
+    def apply_force_displacement(self, pen_tip_pos, ref_positions, ref_thickness, force):
         contact_p, F_vec = self.get_normal_force()
-
-        print("contact_p: ", contact_p)
-        print("F_vec: ", F_vec)
         if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
-            print("self.contact_pz: ", self.contact_pz)
-            print("pen_tip_pos: ", pen_tip_pos)
             F_meas = self.stiffness*(self.contact_pz - pen_tip_pos[2])
         else:
             self.contact_pz = contact_p[2]
@@ -192,28 +214,25 @@ class Controller():
                 position=contact_p,
                 rgba=[0, 1, 0, 0.5]
             )
-        print("F_meas: ", F_meas)
         
+        # get control action
         F_des = self.stiffness * ref_thickness[:, 0]
-        print("F_des: ", F_des)
         F_err = F_des - F_meas
-        print("F_err: ", F_err)
         F_dot = (F_meas - self.F_prev)/self.dt 
-        print("F_dot: ", F_dot) 
         dz = - self.kp_force * (F_err) - self.kd_force * (F_dot) - self.ki_force * (self.F_err_sum)
-        print("dz: ", dz)
 
+        # control logging
         self.F_prev = F_meas
-        print("self.F_prev: ", self.F_prev)
         self.F_err_sum += F_err
-        print("self.F_err_sum: ", self.F_err_sum)
 
-        # shift z reference
+        # shift z reference if force control
         ref_positions = ref_positions.copy()
-        ref_positions[:, 2] += dz
+        if force:
+            ref_positions[:, 2] += dz
         return ref_positions
 
-    def mpc_step(self, ref_positions, ref_thickness):
+
+    def mpc_step(self, ref_positions, ref_thickness, force):
         """ 
         MPC control step
         """        
@@ -223,11 +242,11 @@ class Controller():
 
         # apply displacement from pen tip to end effector
         pen_tip_pos, ref_positions = self.apply_pen_tip_displacement(ref_positions)
-        ref_positions = self.apply_force_displacement(pen_tip_pos, ref_positions, ref_thickness)
 
-        # for position in ref_positions:
-        #     
+        # apply force control
+        ref_positions = self.apply_force_displacement(pen_tip_pos, ref_positions, ref_thickness, force)
 
+        # get current state
         q_curr = self.robot.get_joint_angles(joints=self.robot.controllable_joints)
 
         # Build reference for linearization with current pose as starting point. 
