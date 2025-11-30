@@ -191,6 +191,27 @@ class Controller():
         contact_normal_force, _, _ = self.pen.get_resultant_contact_forces(bodyB=self.writing_pad)
         return contact_point['posA'], contact_normal_force
     
+    def get_pen_tip_world(self):
+        """
+        World position of the pen tip (using the URDF pen base and pen_tip_local).
+        """
+        pen_pos, pen_orient = self.pen.get_base_pos_orient()
+        R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)
+        pen_tip_pos = pen_pos + R @ self.pen_tip_local
+        return pen_tip_pos
+
+    def get_thickness_meas(self):
+        """
+        Convert measured normal force into an equivalent thickness using stiffness.
+        If not in contact, return 0.
+        """
+        contact_p, F_vec = self.get_normal_force()
+        if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
+            return 0.0
+        F_meas = float(np.linalg.norm(F_vec))
+        t_meas = F_meas / self.stiffness / 1.5
+        return t_meas
+
     def apply_pen_tip_displacement(self, ref_positions):
         pen_pos, pen_orient = self.pen.get_base_pos_orient()
         R = np.array(m.p.getMatrixFromQuaternion(pen_orient)).reshape(3, 3)

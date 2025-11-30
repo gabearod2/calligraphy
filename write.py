@@ -6,16 +6,30 @@ import control.control as c
 import scipy.spatial.transform as sst
 from trajectory_generation.handwriting_to_points import handwriting_to_points
 
+
+# ---------------------------------------
+# Control type and logging for evaluation
+# ---------------------------------------
+
+mode = "mpc_f" # "ik" "mpc" "mpc_f"
+pos_des_hist = []
+pos_meas_hist = []
+thick_des_hist = []
+thick_meas_hist = []
+
 # ---------------------------------------
 # Defining environment
 # ---------------------------------------
-
-mode = "mpc" # "ik" "mpc" "mpc_f"
 
 sim_dt = 0.005
 env = m.Env(time_step=sim_dt, seed=300)
 ground = m.Ground()
 m.visualize_coordinate_frame()
+env.set_gui_camera(
+    pitch=-30,
+    distance=0.75,
+    yaw=-15
+)
 
 # world objects 
 table = m.URDF(
@@ -146,7 +160,7 @@ x_displacement = -0.1
 
 # Generating handwriting points
 Xs, Ys, Ts, num_letters = handwriting_to_points(
-    image_path="trajectory_generation/handwriting/gabriel_print.jpg",
+    image_path="trajectory_generation/handwriting/G.jpg",
     plot=False,
 )
 
@@ -228,6 +242,16 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
             # run mpc for this window
             controller.mpc_step(writing_seg, thickness_seg, force)
             m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
+
+            # logging
+            pos_des = writing_seg[0]          
+            thick_des = thickness_seg[0, 0] 
+            pos_meas = controller.get_pen_tip_world()
+            thick_meas = controller.get_thickness_meas()
+            pos_des_hist.append(pos_des)
+            pos_meas_hist.append(pos_meas)
+            thick_des_hist.append(thick_des)
+            thick_meas_hist.append(thick_meas)
     
     elif mode=="mpc":
         force = False
@@ -249,7 +273,17 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
             # run mpc for this window
             controller.mpc_step(writing_seg, thickness_seg, force)
             m.step_simulation(steps=round(controller.dt / sim_dt), realtime=True)
-    
+
+            # logging
+            pos_des = writing_seg[0]          
+            thick_des = thickness_seg[0, 0] 
+            pos_meas = controller.get_pen_tip_world()
+            thick_meas = controller.get_thickness_meas()
+            pos_des_hist.append(pos_des)
+            pos_meas_hist.append(pos_meas)
+            thick_des_hist.append(thick_des)
+            thick_meas_hist.append(thick_meas)
+
     elif mode=="ik":
         force = False
 
@@ -261,6 +295,47 @@ for xs, ys, ts in zip(Xs, Ys, Ts):
             # run ik controller
             controller.ik_move_to_write(writing_point, gripper_orient_quat)
 
-    
+            # logging
+            pos_des = writing_point
+            pos_meas = controller.get_pen_tip_world()
+            thick_des = thickness_trajectory[k, 0]
+            thick_meas = controller.get_thickness_meas()
+            pos_des_hist.append(pos_des)
+            pos_meas_hist.append(pos_meas)
+            thick_des_hist.append(thick_des)
+            thick_meas_hist.append(thick_meas)
+
+# error calculation
+pos_des_hist = np.array(pos_des_hist)      
+pos_meas_hist = np.array(pos_meas_hist)    
+thick_des_hist = np.array(thick_des_hist)  
+thick_meas_hist = np.array(thick_meas_hist)
+
+# position error
+e_pos = pos_meas_hist[:, :2] - pos_des_hist[:, :2] 
+e_pos_norm = np.linalg.norm(e_pos, axis=1)
+
+rmse_pos = np.sqrt(np.mean(e_pos_norm**2))
+max_pos_err = np.max(e_pos_norm)
+
+# thickness error
+e_thick = thick_meas_hist - thick_des_hist 
+rmse_thick = np.sqrt(np.mean(e_thick**2))
+max_thick_err = np.max(np.abs(e_thick))
+
+print(f"Method: {mode}")
+print(f"Position RMSE (xy): {rmse_pos:.4f} m")
+print(f"Position Max Error (xy): {max_pos_err:.4f} m")
+print(f"Thickness RMSE: {rmse_thick:.6f} m")
+print(f"Thickness Max Error: {max_thick_err:.6f} m")
+
+# save results
+np.savez(f"results_{mode}.npz",
+         pos_des=pos_des_hist,
+         pos_meas=pos_meas_hist,
+         thick_des=thick_des_hist,
+         thick_meas=thick_meas_hist,
+         rmse_pos=rmse_pos,
+         rmse_thick=rmse_thick)
 
     
