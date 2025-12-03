@@ -19,6 +19,7 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
     if img is None:
         raise ValueError(f"Could not load image at {image_path}")
 
+    cv2.imshow('Image', img)
     # --- Convert to black and white --- #
     _, binary = cv2.threshold(img, lower_bound, upper_bound, cv2.THRESH_BINARY_INV)
     binary = cv2.medianBlur(binary, 3)
@@ -99,10 +100,11 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
         # --- Plot A: Thickness Heatmap --- #
         plt.subplot(1, 2, 1)
         plt.title("Skeleton with Thickness Heatmap")
+        plt.imshow(img, cmap="gray", alpha=1)
         # c=thicknesses maps color to value
         sc = plt.scatter(*zip(*points), c=thicknesses, cmap='plasma', s=5)
         plt.colorbar(sc, label='Stroke Width (px)')
-        plt.gca().invert_yaxis()
+        #plt.gca().invert_yaxis()
         plt.axis('equal')
 
         # --- Plot B: Stroke Reconstruction (Variable Radius) --- #
@@ -111,12 +113,13 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
         
         # Calculate marker size for scatter plot
         # s in scatter is Area (points^2). Area is proportional to Diameter^2.
-
+        
         scale = 0.05    # Tune this scaling parameter to achieve desired thickness
         sizes = (np.array(thicknesses) ** 2) * scale
         
-        plt.scatter(*zip(*points), s=sizes, c='black', alpha=0.6)
-        plt.gca().invert_yaxis()
+        plt.scatter(*zip(*points), s=sizes, c='red', alpha=0.6)
+        plt.imshow(img, cmap='gray', alpha=1)
+        #plt.gca().invert_yaxis()
         plt.axis('equal')
         
         plt.tight_layout()
@@ -159,63 +162,130 @@ def handwriting_to_points(image_path, lower_bound=150, upper_bound=255, plot=Fal
             ts.append(thicknesses[i])
 
     print("Trajectory generation completed.")
+
+    iou, recall, precision, recon_img = evaluate_reconstruction(binary, points, thicknesses)
+    
+    print("-" * 30)
+    print(f"Performance Metrics:")
+    print(f"  Intersection over Union (IoU): {iou:.2%}")
+    print(f"  Recall (Coverage):             {recall:.2%}")
+    print(f"  Precision (Containment):       {precision:.2%}")
+    print("-" * 30)
+
+    if plot:
+        # Green = Correct, Red = Missing Ink, Blue = Extra/Spilled Ink
+        error_map = np.zeros((binary.shape[0], binary.shape[1], 3), dtype=np.uint8)
+        
+        # Ground Truth (Green channel)
+        error_map[binary > 0] = [0, 255, 0] 
+        # Reconstruction (Blue channel mixing with Green)
+        # Result: White/Cyan = Match. Green = Missed. Blue = Spilled.
+        
+        vis_map = np.zeros((binary.shape[0], binary.shape[1], 3), dtype=np.uint8)
+        gt_bool = binary > 0
+        recon_bool = recon_img > 0
+        
+        # Matches (White)
+        vis_map[np.logical_and(gt_bool, recon_bool)] = [255, 255, 255]
+        # Missed (Green) - Original had ink, we didn't
+        vis_map[np.logical_and(gt_bool, ~recon_bool)] = [0, 255, 0]
+        # Spilled (Red) - We have ink, original didn't
+        vis_map[np.logical_and(~gt_bool, recon_bool)] = [0, 0, 255]
+
+        plt.figure(figsize=(5, 3))
+        plt.title(f"Error Map (Jaccard Index: {iou:.2%})\nWhite=Match, Green=Missed Ink, Red=Spillover")
+        plt.imshow(vis_map)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig("error_map.png", dpi=600, bbox_inches="tight")
+
+        plt.show()
+        
     
     return xs_by_contour, ys_by_contour, ts_by_contour, len(contours)
 
-# --- Finding the distance between two points in 3D space --- #
-def dist(p1, p2):
-    return np.sqrt((p2[0] - p1[0])**2 +
-                     (p2[1] - p1[1])**2 +
-                     (p2[2] - p1[2])**2)
+def evaluate_reconstruction(original_binary, points, thicknesses):
+    # Create a blank canvas of the same size
+    reconstructed = np.zeros_like(original_binary)
+    
+    # Reconstruct the image by drawing circles at every point
+    for (pt, t) in zip(points, thicknesses):
+        x, y = pt
+        if x is not None: # Skip pen lifts
+            # t is diameter, we need radius. Ensure it's at least 1 pixel.
+            radius = max(int(t / 2), 1)
+            cv2.circle(reconstructed, (int(x), int(y)), radius, 255, -1)
+            
+    # --- Calculate Metrics ---
+    # Convert images to boolean (True where ink exists, False where background)
+    gt_bool = original_binary > 0
+    recon_bool = reconstructed > 0
+    
+    # Intersection: Pixels that are black in BOTH original and reconstruction
+    intersection = np.logical_and(gt_bool, recon_bool)
+    
+    # Union: Pixels that are black in EITHER original or reconstruction
+    union = np.logical_or(gt_bool, recon_bool)
+    
+    # IoU Score (0.0 to 1.0) - The "Gold Standard" for shape accuracy
+    iou = np.sum(intersection) / np.sum(union) if np.sum(union) > 0 else 0.0
+    
+    # Recall: How much of the original handwriting did we capture?
+    recall = np.sum(intersection) / np.sum(gt_bool) if np.sum(gt_bool) > 0 else 0.0
+    
+    # Precision: How much of our reconstruction is "real" ink (vs. spilling over edges)?
+    precision = np.sum(intersection) / np.sum(recon_bool) if np.sum(recon_bool) > 0 else 0.0
+    
+    return iou, recall, precision, reconstructed
 
 
 if __name__ == "__main__":
     print("Testing Handwriting Tracjectory Generation")
 
     # --- Generate points to track --- #
-    xs, ys, ts = handwriting_to_points("handwriting/gabriel_print.jpg", plot=True)
+    xs, ys, ts, n_chars = handwriting_to_points("handwriting/motion_cursive.jpg", plot=True)
 
-    target_pos = []
-    for i, point in enumerate(xs):
-        target_pos.append([(xs[i]), -(ys[i]), 0.8])
+    # target_pos = []
+    # for i, point in enumerate(xs):
+    #     target_pos.append([(xs[i]), -(ys[i]), 0.8])
 
-    # --- Environment setup --- #
+    # # --- Environment setup --- #
 
-    # Create environment and ground plane
-    env = m.Env(time_step=0.1)
-    ground = m.Ground()
+    # # Create environment and ground plane
+    # env = m.Env(time_step=0.1)
+    # ground = m.Ground()
 
-    # Create table
-    table = m.URDF(filename=os.path.join(m.directory, 'table', 'table.urdf'), static=True, position=[0, 0, 0], orientation=[0, 0, 0, 1])
+    # # Create table
+    # table = m.URDF(filename=os.path.join(m.directory, 'table', 'table.urdf'), static=True, position=[0, 0, 0], orientation=[0, 0, 0, 1])
 
-    # Create Panda manipulator
-    robot = m.Robot.Panda(position=[0.75, 0, 0.75])
+    # # Create Panda manipulator
+    # robot = m.Robot.Panda(position=[0.75, 0, 0.75])
 
-    # Move end effector to a starting position using IK
-    pos = [0, 0, 0.8]
-    orient = m.get_quaternion([np.pi, 0, 0])
-    target_joint_angles = robot.ik(robot.end_effector, target_pos=pos, target_orient=orient)
-    robot.control(target_joint_angles, set_instantly=True)
+    # # Move end effector to a starting position using IK
+    # pos = [0, 0, 0.8]
+    # orient = m.get_quaternion([np.pi, 0, 0])
+    # target_joint_angles = robot.ik(robot.end_effector, target_pos=pos, target_orient=orient)
+    # robot.control(target_joint_angles, set_instantly=True)
 
-    # Tolerance to determine if sphere is spawned
-    tol = 0.001
+    # # Tolerance to determine if sphere is spawned
+    # tol = 0.001
 
-    for index, point in enumerate(target_pos):   
-        if index % 10 == 0:
+    # for index, point in enumerate(target_pos):   
+    #     if index % 10 == 0:
 
-            # IK to solve for joint angles for target position
-            target_joint_angles = robot.ik(robot.end_effector, target_pos=point, target_orient=orient, use_current_joint_angles=True)
+    #         # IK to solve for joint angles for target position
+    #         target_joint_angles = robot.ik(robot.end_effector, target_pos=point, target_orient=orient, use_current_joint_angles=True)
             
-            # Move robot to specified joint angles, set instantly to speed up simulation
-            robot.control(target_joint_angles, set_instantly=True)
+    #         # Move robot to specified joint angles, set instantly to speed up simulation
+    #         robot.control(target_joint_angles, set_instantly=True)
 
-            # Get actual position of end effector after each time step
-            pos, orient = robot.get_link_pos_orient(robot.end_effector)
+    #         # Get actual position of end effector after each time step
+    #         pos, orient = robot.get_link_pos_orient(robot.end_effector)
 
-            # If distance is less than tolerance amount, spawn a sphere at the location the end effector is currently at
-            if dist(pos, point) < tol:
-                m.Shape(m.Sphere(radius=0.0025), static=True, collision=False, 
-                    position=pos, rgba=[0, 1, 0, 1])
+    #         # If distance is less than tolerance amount, spawn a sphere at the location the end effector is currently at
+    #         if dist(pos, point) < tol:
+    #             m.Shape(m.Sphere(radius=0.0025), static=True, collision=False, 
+    #                 position=pos, rgba=[0, 1, 0, 1])
                 
-            m.step_simulation(realtime=True)
+    #         m.step_simulation(realtime=True)
                 
