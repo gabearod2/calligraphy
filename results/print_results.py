@@ -15,6 +15,8 @@ def load_result(suffix):
     pos_meas = data["pos_meas"]
     thick_des = data["thick_des"]  
     thick_meas = data["thick_meas"]
+    success = data["success"]
+    fname = data["filename"]
 
     # RMSE values 
     rmse_pos = float(data["rmse_pos"])
@@ -34,26 +36,29 @@ def load_result(suffix):
         "rmse_thick": rmse_thick,
         "max_pos": max_pos_err,
         "max_thick": max_thick_err,
+        "success": success,
+        "fname": fname
     }
 
 
 def print_table(results):
     """Pretty print results in a table."""
-    print("\n=== TRACKING PERFORMANCE COMPARISON ===\n")
-    print("{:<10} {:>20} {:>15} {:>15} {:>15}".format(
-        "Method/Word", "RMSE_Pos (m)", "Max_Pos (m)", "RMSE_Thick (m)", "Max_Thick (m)"
+    print("\n=== TRACKING PERFORMANCE, POSE AND THICKNESS ===\n")
+    print("{:<20} {:>18} {:>14} {:>16} {:>15} {:>10}".format(
+        "Method/Word", "RMSE_Pos (m)", "Max_Pos (m)", "RMSE_Thick (m)", "Max_Thick (m)", "Success",
     ))
-    print("-" * 80)
+    print("-" * 105)
 
     for res in results:
         if res is None:
             continue
-        print("{:<10} {:>15.6f} {:>15.6f} {:>15.6f} {:>15.6f}".format(
+        print("{:<20} {:>15.6f} {:>15.6f} {:>15.6f} {:>15.6f} {:>15.6f}".format(
             res["word_mode"],
             res["rmse_pos"],
             res["max_pos"],
             res["rmse_thick"],
             res["max_thick"],
+            res["success"]
         ))
 
     print("\n")
@@ -61,7 +66,28 @@ def print_table(results):
 
 if __name__ == "__main__":
 
-    suffixes = ["arnav_cursive"]
+    print("\nNOTE: Different tuning parameters are usedin this version when compared to papers reusults.")
+    print("To replicate: Lower Kp to 0.75e-5 & Lower thickness_scale to 5000.")
+
+    suffixes = [
+        "arnav_cursive",
+        "arnav_print",
+        "g_print",
+        "gabriel_print",
+        "gabriel_cursive",
+        "manipulation_print",
+        "manipulation_cursive",
+        "mechanics_cursive",
+        "mechanics_print",
+        "motion_cursive",
+        "motion_print",
+        "symbol_cursive",
+        "symbol_print",
+        "talk_cursive",
+        "talk_print",
+        "virtual_cursive",
+        "virtual_print",
+    ]
     results = []
 
     for suffix in suffixes:
