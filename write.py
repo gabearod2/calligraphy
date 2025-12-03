@@ -141,8 +141,9 @@ controller.ik_move_to(lift_pos, gripper_orient_quat)
 
 # generating handwriting points
 print("Generating the writing trajectory.")
+image_path=f"trajectory_generation/handwriting/{word}.jpg"
 Xs, Ys, Ts, num_letters = handwriting_to_points(
-    image_path=f"trajectory_generation/handwriting/{word}.jpg",
+    image_path=image_path,
     plot=False,
 )
 
@@ -256,10 +257,14 @@ print(f"Thickness RMSE: {rmse_thick:.6f} m")
 print(f"Thickness Max Error: {max_thick_err:.6f} m")
 
 # save results
-np.savez(f"results/results_{word}.npz",
-         pos_des=pos_des_hist,
-         pos_meas=pos_meas_hist,
-         thick_des=thick_des_hist,
-         thick_meas=thick_meas_hist,
-         rmse_pos=rmse_pos,
-         rmse_thick=rmse_thick)
+np.savez(
+    f"results/results_{word}.npz",
+    pos_des=pos_des_hist,
+    pos_meas=pos_meas_hist,
+    thick_des=thick_des_hist,
+    thick_meas=thick_meas_hist,
+    rmse_pos=rmse_pos,
+    rmse_thick=rmse_thick,
+    success=True,  
+    filename=f"{word}.jpg",
+)
