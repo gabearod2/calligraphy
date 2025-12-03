@@ -212,7 +212,7 @@ class Controller():
         if F_vec is None or float(np.linalg.norm(F_vec)) == 0.0:
             return 0.0
         F_meas = float(np.linalg.norm(F_vec))
-        t_meas = F_meas / self.stiffness / 1.5
+        t_meas = F_meas / self.stiffness / 2
         return t_meas
 
     def apply_pen_tip_displacement(self, ref_positions):
@@ -231,13 +231,13 @@ class Controller():
         else:
             self.contact_pz = contact_p[2]
             F_meas = float(np.linalg.norm(F_vec))
-            m.Shape(
-                m.Sphere(radius=F_meas/self.stiffness/1.5),
-                static=True,
-                collision=False,
-                position=contact_p,
-                rgba=[0, 1, 0, 0.5]
-            )
+            # m.Shape(
+            #     m.Sphere(radius=F_meas/self.stiffness/2),
+            #     static=True,
+            #     collision=False,
+            #     position=contact_p,
+            #     rgba=[0, 1, 0, 0.5]
+            # )
         
         # get control action
         F_des = self.stiffness * ref_thickness[:, 0]
@@ -396,11 +396,8 @@ if __name__ == "__main__":
     # ---------------------------------------
     # Follow trajectory
     # ---------------------------------------
-    # TODO: add desired thickness of the written segment.
-    # would require moving the trajectory onto a surface.
-    # would also require getting the normals on the pen. 
 
-    # """ STRAIGHT LINE TRAJECTORY """
+    """ STRAIGHT LINE TRAJECTORY """
     # traj = []
     # N_traj = 20
     # for i in range(N_traj):

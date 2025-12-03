@@ -1,2 +1,0 @@
-Turn spline into points
-Start from point 0 and iterate sequentially through all points deleting points that are closer than 1 cm
