@@ -66,9 +66,6 @@ def print_table(results):
 
 if __name__ == "__main__":
 
-    print("\nNOTE: Different tuning parameters are usedin this version when compared to papers reusults.")
-    print("To replicate: Lower Kp to 0.75e-5 & Lower thickness_scale to 5000.")
-
     suffixes = [
         "arnav_cursive",
         "arnav_print",
